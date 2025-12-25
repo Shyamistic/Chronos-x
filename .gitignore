@@ -1,0 +1,31 @@
+# Python venv and caches
+.venv/
+env/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment / secrets
+.env
+*.env
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Streamlit / cache
+.streamlit/
+.cache/
+
+# Jupyter / notebooks (if any)
+.ipynb_checkpoints/

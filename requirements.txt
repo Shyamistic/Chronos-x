@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+aiohttp
+httpx
+pandas
+numpy
+xgboost
+streamlit
+plotly
+requests
+pytest
+pytest-anyio
