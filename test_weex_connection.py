@@ -3,7 +3,7 @@ import time
 from backend.trading.weex_client import WeexClient
 
 SYMBOL = "cmt_btcusdt"
-SIZE = "0.0005"
+SIZE = "0.0003"
 
 if __name__ == "__main__":
     c = WeexClient()
