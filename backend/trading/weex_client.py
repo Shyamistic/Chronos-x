@@ -115,22 +115,28 @@ class WeexClient:
         self,
         symbol: str,
         size: str,
-        price: str,
         type_: str,
+        price: Optional[str] = None,
+        match_price: str = "0",
     ):
         body = {
             "symbol": symbol,
             "size": size,
-            "price": price,
-            "type": type_,          # 1=open long, 3=close long
+            "type": type_,
             "order_type": "0",
-            "match_price": "0",
+            "match_price": match_price,
             "client_oid": f"chronosx-{int(time.time()*1000)}",
         }
+
+        # Only include price for LIMIT orders
+        if match_price == "0":
+            body["price"] = price
+
         return self._request(
             "POST",
             "/capi/v2/order/placeOrder",
             body=body,
             timeout=15,
         )
+
 
