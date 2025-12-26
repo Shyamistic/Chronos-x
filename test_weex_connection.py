@@ -1,17 +1,12 @@
-import os
-from dotenv import load_dotenv
+# test_weex_connection.py
+
 from backend.trading.weex_client import WeexClient
 
-load_dotenv()
+if __name__ == "__main__":
+    client = WeexClient()
 
-print("API:", os.getenv("WEEX_API_KEY"))
-print("SECRET:", "SET" if os.getenv("WEEX_API_SECRET") else None)
-print("PASS:", "SET" if os.getenv("WEEX_API_PASSPHRASE") else None)
+    print("=== TICKER TEST ===")
+    print(client.get_ticker("cmt_btcusdt"))
 
-client = WeexClient(
-    api_key=os.getenv("WEEX_API_KEY"),
-    secret_key=os.getenv("WEEX_API_SECRET"),
-    passphrase=os.getenv("WEEX_API_PASSPHRASE"),
-)
-
-print(client.get_accounts())
+    print("\n=== ACCOUNT TEST ===")
+    print(client.get_accounts())
