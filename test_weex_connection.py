@@ -1,7 +1,7 @@
 import os
 import asyncio
 from dotenv import load_dotenv
-from backend.trading.weex_client import WEEXClient
+from backend.trading.weex_client import WeexClient
 
 load_dotenv()
 print("API:", os.getenv("WEEX_API_KEY"))

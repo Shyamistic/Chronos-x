@@ -1,162 +1,244 @@
 # backend/trading/weex_client.py
+
 """
-ChronosX WEEX Futures API Client (async)
+Minimal WEEX contract API client for AI Wars API testing.
 
-Minimal, production-ready wrapper around WEEX contract API for:
-- fetching candles
-- fetching account info
-- placing / cancelling orders
-
-Followed from official AI Wars participant guide and API intro. [web:119][web:123][web:132]
+Implements:
+- HMAC-SHA256 + Base64 signature
+- Headers: ACCESS-KEY / ACCESS-SIGN / ACCESS-TIMESTAMP / ACCESS-PASSPHRASE
+- Core helpers used for the hackathon API test:
+  - get_accounts()         -> /capi/v2/account/getAccounts
+  - get_contract(symbol)   -> /capi/v2/market/contracts
+  - get_ticker(symbol)     -> /capi/v2/market/ticker
+  - place_order(...)       -> /capi/v2/order/placeOrder
+  - get_order_detail(...)  -> /capi/v2/order/detail
+  - get_trades(...)        -> /capi/v2/order/trade
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 from typing import Any, Dict, Optional
 
-import aiohttp
+import requests
+from dotenv import load_dotenv
+
+# Load .env once at import
+load_dotenv()
+
+BASE_URL = "https://api-contract.weex.com"
+
+WEEX_API_KEY = os.getenv("WEEX_API_KEY")
+WEEX_API_SECRET = os.getenv("WEEX_API_SECRET")
+WEEX_API_PASSPHRASE = os.getenv("WEEX_API_PASSPHRASE")
 
 
 class WeexClient:
     def __init__(
         self,
-        api_key: str,
-        api_secret: str,
-        passphrase: str,
-        base_url: str = "https://api-contract.weex.com",
-        timeout: int = 10,
-    ):
-        self.api_key = api_key
-        self.api_secret = api_secret.encode()
-        self.passphrase = passphrase
+        api_key: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        passphrase: Optional[str] = None,
+        base_url: str = BASE_URL,
+    ) -> None:
+        self.api_key = api_key or WEEX_API_KEY
+        self.secret_key = secret_key or WEEX_API_SECRET
+        self.passphrase = passphrase or WEEX_API_PASSPHRASE
         self.base_url = base_url.rstrip("/")
-        self.timeout = aiohttp.ClientTimeout(total=timeout)
-        self.session: Optional[aiohttp.ClientSession] = None
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession(timeout=self.timeout)
-        return self.session
+        if not (self.api_key and self.secret_key and self.passphrase):
+            raise RuntimeError("Missing WEEX credentials in environment or constructor")
 
-    def _sign(self, timestamp: str, method: str, request_path: str, body: str) -> str:
+    # ------------------------------------------------------------------ #
+    # Signing                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _sign(
+        self,
+        timestamp: str,
+        method: str,
+        request_path: str,
+        query_string: str = "",
+        body: str = "",
+    ) -> str:
         """
-        HMAC-SHA256 signature used by WEEX contract API. [web:123]
-        """
-        message = f"{timestamp}{method.upper()}{request_path}{body}"
-        signature = hmac.new(self.api_secret, message.encode(), hashlib.sha256).hexdigest()
-        return signature
+        Signature from AI Wars Participant Guide:
 
-    async def _request(
+        payload = timestamp + method + request_path + query_string + body
+        sign    = base64( HMAC_SHA256(secret_key, payload) )
+        """
+        payload = f"{timestamp}{method.upper()}{request_path}{query_string}{body}"
+        digest = hmac.new(
+            self.secret_key.encode("utf-8"),
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        return base64.b64encode(digest).decode()
+
+    def _headers(
         self,
         method: str,
-        path: str,
-        params: Optional[Dict[str, Any]] = None,
-        body: Optional[Dict[str, Any]] = None,
-        auth: bool = False,
-    ) -> Dict[str, Any]:
-        url = f"{self.base_url}{path}"
-        session = await self._get_session()
-        params = params or {}
-        body_str = json.dumps(body) if body else ""
-        headers: Dict[str, str] = {
+        request_path: str,
+        query_string: str,
+        body: str,
+    ) -> Dict[str, str]:
+        ts = str(int(time.time() * 1000))  # ms timestamp
+        sign = self._sign(ts, method, request_path, query_string, body)
+        return {
             "Content-Type": "application/json",
             "locale": "en-US",
+            "ACCESS-KEY": self.api_key,
+            "ACCESS-SIGN": sign,
+            "ACCESS-TIMESTAMP": ts,
+            "ACCESS-PASSPHRASE": self.passphrase,
         }
 
-        if auth:
-            ts = str(int(time.time() * 1000))
-            sign = self._sign(ts, method, path, body_str)
-            headers.update(
-                {
-                    "X-API-KEY": self.api_key,
-                    "X-API-SIGN": sign,
-                    "X-API-TIMESTAMP": ts,
-                    "X-API-PASSPHRASE": self.passphrase,
-                }
-            )
+    def _request(
+        self,
+        method: str,
+        request_path: str,
+        query_params: Optional[Dict[str, Any]] = None,
+        json_body: Optional[Dict[str, Any]] = None,
+        timeout: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Low-level HTTP helper matching WEEX docs.
 
-        async with session.request(
+        request_path: e.g. "/capi/v2/market/ticker"
+        query_params: dict -> encoded into "?key=value..."
+        json_body:    dict -> JSON-string body
+        """
+        # Build query string
+        if query_params:
+            # Keep it simple, no URL encoding for these simple keys.
+            query_string = "?" + "&".join(
+                f"{k}={v}" for k, v in query_params.items() if v is not None
+            )
+        else:
+            query_string = ""
+
+        # Body
+        if json_body is not None:
+            body_str = json.dumps(json_body, separators=(",", ":"))
+        else:
+            body_str = ""
+
+        url = f"{self.base_url}{request_path}{query_string}"
+        headers = self._headers(method, request_path, query_string, body_str)
+
+        resp = requests.request(
             method=method.upper(),
             url=url,
-            params=params,
-            data=body_str or None,
             headers=headers,
-        ) as resp:
-            text = await resp.text()
-            try:
-                data = json.loads(text)
-            except json.JSONDecodeError:
-                raise RuntimeError(f"Non-JSON WEEX response {resp.status}: {text}")
+            data=body_str or None,
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
-            if resp.status != 200:
-                raise RuntimeError(f"WEEX error {resp.status}: {data}")
-
-            return data
-
-    # ------------------------------------------------------------------ #
-    # Public endpoints
-    # ------------------------------------------------------------------ #
-
-    async def get_candles(
-        self, symbol: str, interval: str = "1h", limit: int = 200
-    ) -> Dict[str, Any]:
-        """
-        Get historical candles for a contract symbol. Uses contract kline endpoint. [web:119]
-        """
-        # Exact path may differ; adjust once doc is confirmed.
-        path = "/capi/v1/market/candles"
-        params = {"symbol": symbol, "interval": interval, "limit": limit}
-        return await self._request("GET", path, params=params, auth=False)
-
-    async def get_ticker(self, symbol: str) -> Dict[str, Any]:
-        """
-        Get latest ticker for a contract symbol. [web:119]
-        """
-        path = "/capi/v1/market/ticker"
-        params = {"symbol": symbol}
-        return await self._request("GET", path, params=params, auth=False)
+        # WEEX returns code/ msg in body; raise if not success
+        code = str(data.get("code", ""))
+        if code and code != "00000":
+            raise RuntimeError(f"WEEX API error {code}: {data}")
+        return data
 
     # ------------------------------------------------------------------ #
-    # Private endpoints (require IP allowlist + hackathon key) [web:123]
+    # High-level helpers used in API test                                #
     # ------------------------------------------------------------------ #
 
-    async def get_account_assets(self) -> Dict[str, Any]:
-        path = "/capi/v2/account/assets"
-        return await self._request("GET", path, auth=True)
+    def get_accounts(self) -> Dict[str, Any]:
+        """
+        Get contract accounts list + balances.
+        Endpoint: GET /capi/v2/account/getAccounts
+        """
+        return self._request("GET", "/capi/v2/account/getAccounts")
 
-    async def place_order(
+    def get_contract(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get futures info (precision, limits) for a symbol.
+        Endpoint: GET /capi/v2/market/contracts
+        """
+        return self._request(
+            "GET",
+            "/capi/v2/market/contracts",
+            query_params={"symbol": symbol},
+        )
+
+    def get_ticker(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get ticker price for a contract symbol.
+        Endpoint (per participant guide): GET /capi/v2/market/ticker
+        """
+        return self._request(
+            "GET",
+            "/capi/v2/market/ticker",
+            query_params={"symbol": symbol},
+        )
+
+    def place_order(
         self,
         symbol: str,
-        side: str,
-        price: str,
+        client_oid: str,
         size: str,
-        order_type: str = "limit",
-        leverage: str = "3",
+        price: str,
+        type_: str = "1",
+        order_type: str = "0",
+        match_price: str = "0",
     ) -> Dict[str, Any]:
         """
-        Place contract order. [web:132]
+        Place a normal limit order per Participant Guide example. [web:6][web:32]
+
+        Required fields:
+        - symbol: "cmt_btcusdt"
+        - client_oid: custom ID
+        - size: order quantity (as string, e.g. "0.0001")
+        - type_: "1" open long / "2" open short / "3" close long / "4" close short
+        - order_type: "0" normal
+        - match_price: "0" limit price, "1" market price
+        - price: limit price (required when match_price == "0")
         """
-        path = "/capi/v1/order/placeOrder"
         body = {
             "symbol": symbol,
-            "side": side,  # "buy" / "sell"
-            "price": price,
+            "client_oid": client_oid,
             "size": size,
-            "orderType": order_type,
-            "leverage": leverage,
+            "type": type_,
+            "order_type": order_type,
+            "match_price": match_price,
+            "price": price,
         }
-        return await self._request("POST", path, body=body, auth=True)
+        return self._request("POST", "/capi/v2/order/placeOrder", json_body=body, timeout=15)
 
-    async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        path = "/capi/v1/order/cancelOrder"
-        body = {"symbol": symbol, "orderId": order_id}
-        return await self._request("POST", path, body=body, auth=True)
+    def get_order_detail(self, order_id: str) -> Dict[str, Any]:
+        """
+        Get single order info.
+        Endpoint: GET /capi/v2/order/detail
+        """
+        return self._request(
+            "GET",
+            "/capi/v2/order/detail",
+            query_params={"orderId": order_id},
+        )
 
-    async def close(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
-            self.session = None
+    def get_trades(
+        self,
+        symbol: str,
+        order_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        Get trade details for completed orders.
+        Endpoint from Participant Guide: /capi/v2/order/trade
+        """
+        params: Dict[str, Any] = {"symbol": symbol, "limit": limit}
+        if order_id:
+            params["orderId"] = order_id
+        return self._request(
+            "GET",
+            "/capi/v2/order/trade",
+            query_params=params,
+        )
