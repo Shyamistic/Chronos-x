@@ -6,12 +6,12 @@ load_dotenv()
 
 print("API:", os.getenv("WEEX_API_KEY"))
 print("SECRET:", "SET" if os.getenv("WEEX_API_SECRET") else None)
+print("PASS:", "SET" if os.getenv("WEEX_API_PASSPHRASE") else None)
 
-def main():
-    client = WeexClient()
-    ticker = client.get_ticker("cmt_btcusdt")
-    print("SUCCESS:")
-    print(ticker)
+client = WeexClient(
+    api_key=os.getenv("WEEX_API_KEY"),
+    secret_key=os.getenv("WEEX_API_SECRET"),
+    passphrase=os.getenv("WEEX_API_PASSPHRASE"),
+)
 
-if __name__ == "__main__":
-    main()
+print(client.get_accounts())
