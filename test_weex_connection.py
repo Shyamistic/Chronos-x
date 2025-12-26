@@ -15,9 +15,6 @@ if __name__ == "__main__":
     print("\n=== ACCOUNT ===")
     print(c.get_accounts())
 
-    print("\n=== SET LEVERAGE 1x ===")
-    print(c.set_leverage(SYMBOL, 1))
-
     price = ticker["last"]
 
     print("\n=== OPEN LONG (small size) ===")
