@@ -34,11 +34,9 @@ class WeexClient:
         self.base_url = base_url.rstrip("/")
 
         if not (self.api_key and self.secret_key and self.passphrase):
-            raise RuntimeError("Missing WEEX API credentials (key/secret/passphrase)")
+            raise RuntimeError("Missing WEEX API credentials")
 
-    # ------------------------------------------------------------------
-    # Signing
-    # ------------------------------------------------------------------
+    # ---------------- SIGNING ---------------- #
 
     def _sign(self, timestamp: str, method: str, path: str, body: str = "") -> str:
         payload = f"{timestamp}{method.upper()}{path}{body}"
@@ -52,7 +50,6 @@ class WeexClient:
     def _headers(self, method: str, path: str, body: str) -> Dict[str, str]:
         ts = str(int(time.time() * 1000))
         sign = self._sign(ts, method, path, body)
-
         return {
             "Content-Type": "application/json",
             "ACCESS-KEY": self.api_key,
@@ -73,7 +70,7 @@ class WeexClient:
         body_str = json.dumps(body, separators=(",", ":")) if body else ""
         url = f"{self.base_url}{path}"
 
-        resp = requests.request(
+        r = requests.request(
             method=method.upper(),
             url=url,
             params=params,
@@ -82,21 +79,15 @@ class WeexClient:
             timeout=timeout,
         )
 
-        resp.raise_for_status()
-        data = resp.json()
+        r.raise_for_status()
+        data = r.json()
 
-        # Enforce WEEX error codes only if present
         if "code" in data and str(data["code"]) not in ("0", "00000"):
             raise RuntimeError(f"WEEX API error {data['code']}: {data}")
 
         return data
 
-    # ------------------------------------------------------------------
-    # Public / Private endpoints
-    # ------------------------------------------------------------------
-
-    def get_accounts(self):
-        return self._request("GET", "/capi/v2/account/getAccounts")
+    # ---------------- API METHODS ---------------- #
 
     def get_ticker(self, symbol: str):
         return self._request(
@@ -104,3 +95,42 @@ class WeexClient:
             "/capi/v2/market/ticker",
             params={"symbol": symbol},
         )
+
+    def get_accounts(self):
+        return self._request("GET", "/capi/v2/account/getAccounts")
+
+    def set_leverage(self, symbol: str, leverage: int = 1):
+        body = {
+            "symbol": symbol,
+            "leverage": leverage,
+            "marginMode": "cross",
+        }
+        return self._request(
+            "POST",
+            "/capi/v2/account/setLeverage",
+            body=body,
+        )
+
+    def place_order(
+        self,
+        symbol: str,
+        size: str,
+        price: str,
+        type_: str,
+    ):
+        body = {
+            "symbol": symbol,
+            "size": size,
+            "price": price,
+            "type": type_,          # 1=open long, 3=close long
+            "order_type": "0",
+            "match_price": "0",
+            "client_oid": f"chronosx-{int(time.time()*1000)}",
+        }
+        return self._request(
+            "POST",
+            "/capi/v2/order/placeOrder",
+            body=body,
+            timeout=15,
+        )
+
