@@ -74,8 +74,10 @@ class WeexClient:
         r.raise_for_status()
         data = r.json()
 
-        if str(data.get("code")) not in ("0", "00000", ""):
-            raise RuntimeError(f"WEEX API error: {data}")
+        # Only enforce code check if 'code' exists (private endpoints)
+        if "code" in data and str(data["code"]) not in ("0", "00000"):
+         raise RuntimeError(f"WEEX API error: {data}")
+
 
         return data
 
