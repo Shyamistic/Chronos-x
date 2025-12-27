@@ -51,7 +51,6 @@ class WeexClient:
         message = timestamp + method.upper() + requestPath + ("?" + query if query else "") + body
         sign = HMAC_SHA256(secret, message).hexdigest()
         """
-        # path is like "/capi/v2/order/placeOrder", query is already "k=v&k2=v2" or ""
         if query:
             request_path = f"{path}?{query}"
         else:
@@ -72,12 +71,11 @@ class WeexClient:
         params: Optional[Dict[str, Any]],
         body_str: str,
     ) -> Dict[str, str]:
-        # WEEX wants Unix epoch in ms, valid 30s, and same value in ACCESS-TIMESTAMP and signature. [web:172][web:168]
-        ts = str(int(time.time() * 1000))
+        # Use Unix epoch in SECONDS for signature to avoid 40009. [web:172]
+        ts = str(int(time.time()))
 
-        # Build query string in exactly the same way as requests will send it
+        # Build query string in a deterministic order
         if params:
-            # Stable ordering for deterministic signature
             items = sorted(params.items())
             query = "&".join(f"{k}={v}" for k, v in items)
         else:
@@ -104,17 +102,14 @@ class WeexClient:
         url = self.base_url + path
         body_str = "" if json_body is None else json.dumps(json_body, separators=(",", ":"))
 
-        # Build headers
         headers: Dict[str, str] = {"Content-Type": "application/json"}
         if auth:
             headers = self._headers(method, path, params, body_str)
 
-        # Debug for AI Wars troubleshooting
-        # (safe: contains no secrets)
         print(
             f"[WeexClient] REQUEST {method} {path} "
-            f"params={params} body={body_str} headers={{'ACCESS-KEY': '{self.api_key[:6]}...', "
-            f"'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
+            f"params={params} body={body_str} headers="
+            f"{{'ACCESS-KEY': '{self.api_key[:6]}...', 'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
         )
 
         resp = requests.request(
@@ -127,7 +122,6 @@ class WeexClient:
         )
 
         if not resp.ok:
-            # Will show error code & message like 40009 sign error. [web:164][web:166]
             print(
                 f"[WeexClient] HTTP {resp.status_code} {method} {path} "
                 f"params={params} body={body_str} resp={resp.text}"
