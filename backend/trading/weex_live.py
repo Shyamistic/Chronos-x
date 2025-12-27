@@ -17,7 +17,6 @@ from backend.risk.circuit_breaker import MultiLayerCircuitBreaker
 from backend.execution.smart_execution import SmartExecutionEngine
 from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
 from backend.governance.mpc_governance import MPCGovernance
-
 from backend.config import TradingConfig
 
 
@@ -167,14 +166,17 @@ class WeexTradingLoop:
 
         # Initialize infrastructure
         self.kelly_sizer = KellyCriterionSizer(
-            account_equity=50000, max_risk_per_trade=0.02
-        )
-        self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)
+            account_equity=50000,
+            max_risk_per_trade=0.02,
+        )  # returns dict with "position_size"[file:125]
+        self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)[file:125]
         self.smart_execution = SmartExecutionEngine(
-            weex_client, max_slippage_pct=0.003, max_latency_ms=1500
-        )
-        self.monitor = RealTimePerformanceMonitor()
-        self.mpc_governance = MPCGovernance(num_nodes=3, threshold=2)
+            weex_client,
+            max_slippage_pct=0.003,
+            max_latency_ms=1500,
+        )[file:125]
+        self.monitor = RealTimePerformanceMonitor()[file:125]
+        self.mpc_governance = MPCGovernance(num_nodes=3, threshold=2)[file:125]
 
         # State tracking
         self.running = False
@@ -188,8 +190,13 @@ class WeexTradingLoop:
 
     def _print_startup_banner(self):
         """Print trading mode and configuration at startup."""
-        mode = "ALPHA (force_execute=true, NO governance)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)"
-        print("""
+        mode = (
+            "ALPHA (force_execute=true, NO governance)"
+            if TradingConfig.FORCE_EXECUTE_MODE
+            else "PRODUCTION (governance required)"
+        )
+        print(
+            """
 ================================================================================
 [WeexTradingLoop] TRADING CONFIGURATION
 ================================================================================
@@ -201,7 +208,13 @@ Account Equity:         $50,000
 Circuit Breaker:        6-layer enabled
 Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
 ================================================================================
-        """.format(mode, TradingConfig.MIN_CONFIDENCE, TradingConfig.MAX_POSITION_SIZE, TradingConfig.KELLY_FRACTION))
+        """.format(
+                mode,
+                TradingConfig.MIN_CONFIDENCE,
+                TradingConfig.MAX_POSITION_SIZE,
+                TradingConfig.KELLY_FRACTION,
+            )
+        )
 
     async def run(self):
         """Start live trading loop."""
@@ -224,14 +237,14 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 signal = self.paper_trader.get_ensemble_signal()
 
                 if signal and signal.get("dir") != 0:
-                    # Check circuit breaker FIRST
+                    # Circuit breaker
                     if not self.circuit_breaker.is_trading_allowed():
                         print(
                             f"[WeexTradingLoop] Trading halted: {self.circuit_breaker.break_reason}"
                         )
                         continue
 
-                    # Check confidence threshold
+                    # Confidence threshold
                     if signal.get("conf", 0) < TradingConfig.MIN_CONFIDENCE:
                         print(
                             f"[WeexTradingLoop] Signal rejected: confidence {signal['conf']} < {TradingConfig.MIN_CONFIDENCE}"
@@ -263,7 +276,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
     ) -> Dict[str, Any]:
         """
         Execute trade with full governance chain.
-        
+
         Flow:
         1. Size position via Kelly Criterion
         2. Check circuit breaker
@@ -272,19 +285,17 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         5. Record trade
         """
         try:
-            # 1. Size position
+            # 1. Size position (dict-returning Kelly)
             size_result = self.kelly_sizer.calculate_position_size(
                 signal_confidence=confidence,
                 stop_loss_pct=0.02,
                 profit_target_pct=0.05,
                 current_price=price,
-            )
+            )  # returns {"position_size": ..., ...}[file:125]
             size = size_result["position_size"]
 
             if size <= 0 or size > TradingConfig.MAX_POSITION_SIZE:
-                print(
-                    f"[WeexTradingLoop] Size out of bounds: {size} BTC"
-                )
+                print(f"[WeexTradingLoop] Size out of bounds: {size} BTC")
                 return {"error": "size_out_of_bounds"}
 
             side = "buy" if direction == 1 else "sell"
@@ -299,9 +310,8 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 "timestamp": int(time.time() * 1000),
             }
 
-            # 3. MPC Governance (conditional)
+            # 3. MPC Governance
             if not TradingConfig.FORCE_EXECUTE_MODE:
-                # Production mode: require 2-of-3 approval
                 governance_result = self.mpc_governance.submit_trade(trade)
                 if not governance_result.get("approved", False):
                     print(
@@ -312,9 +322,8 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                     f"[WeexTradingLoop] MPC APPROVED by nodes: {governance_result.get('approvers', [])}"
                 )
             else:
-                # Alpha testing mode: skip governance, execute immediately
                 print(
-                    f"[WeexTradingLoop] ALPHA MODE: Executing without MPC approval (force_execute=true)"
+                    "[WeexTradingLoop] ALPHA MODE: Executing without MPC approval (force_execute=true)"
                 )
 
             # 4. Execute with quality gates
@@ -334,7 +343,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
             self.trades.append(execution_result)
             self.trade_count += 1
 
-            # Update open positions for circuit breaker
+            # Track open positions for circuit breaker
             self.open_positions.append(
                 {
                     "side": 1 if side == "buy" else -1,
@@ -345,11 +354,11 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 }
             )
 
-            # Update circuit breaker state
+            # Update circuit breaker state (PNL updated on close)
             self.circuit_breaker.update_state(
-                trade_pnl=0,  # Updated when trade closes
+                trade_pnl=0,
                 open_positions=len(self.open_positions),
-                leverage_ratio=1.5,  # Futures: 1-2x typical
+                leverage_ratio=1.5,
             )
 
             return execution_result
@@ -367,7 +376,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
     ) -> Dict[str, Any]:
         """
         Execute order with SmartExecution quality gates.
-        
+
         Gates:
         - Slippage: max 0.3%
         - Latency: max 1500ms
@@ -378,17 +387,17 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
             None,
             self.smart_execution.execute_with_quality_gates,
             symbol,
-            side,
             size,
+            side,
             price,
-        )
+        )  # order of args matches SmartExecutionEngine in paste[file:125]
         return result
 
     async def stop(self):
         """Stop live trading loop gracefully."""
         print("[WeexTradingLoop] Stopping...")
         self.running = False
-        await asyncio.sleep(0.5)  # Allow current candle to finish
+        await asyncio.sleep(0.5)
 
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get current performance metrics."""
