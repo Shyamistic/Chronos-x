@@ -40,25 +40,13 @@ weex_trading_loop: Optional[WeexTradingLoop] = None
 # ============================================================================
 
 @app.post("/trading/live")
-async def control_live_trading(request: Dict[str, Any]):
-    """
-    Start or stop live trading.
-    
-    **Request Body:**
-    ```json
-    {"action": "start"} or {"action": "stop"}
-    ```
-    
-    **Response:**
-    ```json
-    {"status": "started"} or {"status": "stopped"}
-    ```
-    """
+async def control_live_trading(action: Dict):
+    """Start or stop live trading."""
     global weex_trading_loop
     
-    action = request.get("action", "").lower()
+    action_type = action.get("action")
     
-    if action == "start":
+    if action_type == "start":
         # Check if already running
         if weex_trading_loop is not None and weex_trading_loop.running:
             return {"status": "already_running", "message": "Trading loop is already active"}
@@ -66,14 +54,7 @@ async def control_live_trading(request: Dict[str, Any]):
         try:
             # Initialize components
             weex_client = WeexClient()
-            paper_trader = PaperTrader()
-            
-            # Verify credentials
-            if not weex_client.api_key or not weex_client.api_secret:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Missing WEEX API credentials in .env"
-                )
+            paper_trader = PaperTrader(initial_balance=10000.0, symbol="cmt_btcusdt")
             
             # Create trading loop
             weex_trading_loop = WeexTradingLoop(
@@ -99,7 +80,7 @@ async def control_live_trading(request: Dict[str, Any]):
                 "message": f"Failed to start trading: {str(e)}"
             }
     
-    elif action == "stop":
+    elif action_type == "stop":
         # Check if running
         if weex_trading_loop is None or not weex_trading_loop.running:
             return {"status": "not_running", "message": "Trading loop is not currently active"}
