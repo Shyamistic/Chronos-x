@@ -30,6 +30,7 @@ class SmartExecutionEngine:
         
         # Fetch current ticker
         ticker = self.client.get_ticker(symbol=symbol)
+        print("[SmartExecution] raw ticker:", ticker) 
         if not ticker or "data" not in ticker:
             return {"error": "Failed to fetch ticker"}
         
