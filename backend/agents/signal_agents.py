@@ -440,24 +440,36 @@ class SentimentAgent:
         """
         Convert price momentum into directional signal.
         
-        Even tiny moves (0.01%) will trigger a direction.
+        On 2nd+ candles, even tiny moves (0.01%) trigger a direction.
+        First candle emits neutral (no prior close to compare).
         """
         # Threshold: 0.01% move is enough to pick a direction
         threshold = 0.0001  # 0.01%
 
-        if abs(self.last_score) < threshold:
-            # No meaningful move yet
+        # First candle or truly no price movement
+        if self.last_close is None or abs(self.last_score) < 1e-8:
             return TradingSignal(
                 agent_id=self.agent_id,
                 direction=0,
                 confidence=0.05,
             )
 
-        # We have a directional move
+        # On 2nd+ candles: any move (even < 0.01%) produces direction
+        if abs(self.last_score) < threshold:
+            # Micro-move: emit weak directional signal
+            direction = 1 if self.last_score >= 0 else -1
+            confidence = 0.08  # very weak for micro-moves
+            return TradingSignal(
+                agent_id=self.agent_id,
+                direction=direction,
+                confidence=confidence,
+                metadata={"price_change_pct": self.last_score * 100},
+            )
+
+        # Meaningful move (>= 0.01%)
         direction = 1 if self.last_score > 0 else -1
 
-        # Confidence scales with magnitude
-        # Even tiny moves (0.01%) get 0.1 confidence, large moves cap at 0.3
+        # Confidence scales with magnitude: 0.01% → 0.1, larger moves cap at 0.3
         confidence = min(0.3, max(0.1, abs(self.last_score) * 100))  # 0.1–0.3 range
 
         return TradingSignal(
