@@ -156,12 +156,30 @@ class PaperTrader:
     # Main simulation APIs
     # ================================================================ #
 
-    async def run_live_simulation(self, candle_stream, hours: int = 24):
-        """Simulate N hours of trading on a candle async generator."""
+        async def run_live_simulation(self, candle_stream, hours: int = 24):
+          "Simulate N hours of trading on a candle async generator."""
         async for candle in candle_stream:
             await self.process_candle(candle)
 
+    def update_candle(self, candle: Candle):
+        """
+        Synchronous candle update (wrapper for async process_candle).
+        Called by WeexTradingLoop during live trading.
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Can't use run_until_complete in running loop, schedule as task
+                asyncio.create_task(self.process_candle(candle))
+            else:
+                loop.run_until_complete(self.process_candle(candle))
+        except RuntimeError:
+            # No event loop, create one
+            asyncio.run(self.process_candle(candle))
+
     async def process_candle(self, candle: Candle):
+
         """
         Process a single candle: detect regime, update agents, decide trade,
         apply governance, and simulate position.
