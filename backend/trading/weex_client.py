@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import os
 import requests
 from dotenv import load_dotenv
+import uuid
 
 load_dotenv()
 
@@ -151,31 +152,34 @@ class WeexClient:
             auth=True,
         )
 
-    def place_order(
-        self,
-        symbol: str,
-        size: str,
-        type_: str,
-        price: str,
-        match_price: str = "0",
-        client_order_id: Optional[str] = None,
-    ):
-        payload: Dict[str, Any] = {
-            "symbol": symbol,
-            "size": size,
-            "type": type_,
-            "order_type": "0",      # normal limit
-            "match_price": match_price,
-            "price": price,
-        }
-        if client_order_id:
-            payload["client_oid"] = client_order_id
+def place_order(
+    self,
+    symbol: str,
+    size: str,
+    type_: str,
+    price: str,
+    match_price: str = "0",
+    client_order_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    # Generate unique client_oid if not provided (WEEX requires it)
+    if not client_order_id:
+        client_order_id = str(uuid.uuid4())
+    
+    payload: Dict[str, Any] = {
+        "symbol": symbol,
+        "size": size,
+        "type": type_,
+        "order_type": "0",
+        "match_price": match_price,
+        "price": price,
+        "client_oid": client_order_id,  # Always include
+    }
 
-        return self._request(
-            "POST",
-            "/capi/v2/order/placeOrder",
-            json_body=payload,
-            auth=True,
-        )
+    return self._request(
+        "POST",
+        "/capi/v2/order/placeOrder",
+        json_body=payload,
+        auth=True,
+    )
 
 
