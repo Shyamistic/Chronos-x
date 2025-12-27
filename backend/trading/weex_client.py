@@ -105,15 +105,20 @@ class WeexClient:
         """
         Get recent candlesticks for a contract symbol.
 
-        Expected WEEX endpoint (adjust path / field names according to docs):
-          GET /capi/v2/market/kline?symbol=cmt_btcusdt&interval=1m&limit=2
+        Contract API kline path (AI Wars docs):
+          GET /capi/v1/contract/kline
         """
         return self._request(
             "GET",
-            "/capi/v2/market/kline",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
+            "/capi/v1/contract/kline",
+            params={
+                "symbol": symbol,
+                "interval": interval,
+                "limit": limit,
+            },
             auth=False,
         )
+
 
     # ------------------------------------------------------------------
     # Trading endpoints (examples; adjust paths to actual WEEX API)
