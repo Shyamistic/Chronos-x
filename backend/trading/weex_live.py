@@ -130,16 +130,12 @@ class WeexLiveStreamer:
             return None
 
 
+# backend/trading/weex_live.py
+
 class WeexTradingLoop:
     """Main trading loop integrating all components."""
-    
-    def __init__(
-        self,
-        weex_client: WeexClient,
-        paper_trader,
-        symbol: str = "cmt_btcusdt",
-        poll_interval: float = 5.0,
-    ):
+
+    def __init__(self, weex_client: WeexClient, paper_trader, symbol: str = "cmt_btcusdt", poll_interval: float = 5.0):
         self.client = weex_client
         self.paper_trader = paper_trader
         self.symbol = symbol
@@ -149,32 +145,31 @@ class WeexTradingLoop:
             granularity="1m",
             poll_interval_sec=poll_interval,
         )
-        
+
         # Initialize infrastructure
         self.kelly_sizer = KellyCriterionSizer(account_equity=50000, max_risk_per_trade=0.02)
         self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)
         self.smart_execution = SmartExecutionEngine(weex_client, max_slippage_pct=0.003, max_latency_ms=300)
-        self.monitor = RealTimePerformanceMonitor()
-        
+
         self.running = False
         self.current_pnl = 0.0
         self.open_positions = []
-    
+
     async def start(self):
         """Start live trading loop."""
         self.running = True
         print("[WeexTradingLoop] Starting live trading (REAL WEEX)...")
-        
+
         try:
             async for candle in self.streamer.stream_candles():
                 if not self.running:
                     break
-                
+
                 print(f"[WeexTradingLoop] Candle: {candle.timestamp} close={candle.close}")
-                
+
                 # Feed into paper trader
                 await self.paper_trader.process_candle(candle)
-                
+
                 # Check circuit breaker
                 if self.circuit_breaker.check_circuit_breaker(
                     current_pnl=self.current_pnl,
@@ -184,11 +179,11 @@ class WeexTradingLoop:
                 ):
                     print(f"[WeexTradingLoop] Trading paused: {self.circuit_breaker.break_reason}")
                     continue
-                
+
                 # Execute if position exists
                 if self.paper_trader.open_position:
                     await self._execute_position()
-        
+
         except asyncio.CancelledError:
             print("[WeexTradingLoop] Cancelled.")
         except Exception as e:
@@ -196,27 +191,26 @@ class WeexTradingLoop:
         finally:
             self.running = False
             print("[WeexTradingLoop] Loop exited.")
-    
+
     async def stop(self):
         """Stop live trading loop."""
         print("[WeexTradingLoop] Stopping...")
         self.running = False
-    
-        async def _execute_position(self):
-          """Execute trade with all infrastructure."""
+
+    async def _execute_position(self):
+        """Execute trade with all infrastructure."""
         pos = self.paper_trader.open_position
         if not pos:
             return
 
         try:
-            # Size position (TradeRecord is a dataclass, use attributes)
+            # Size position from TradeRecord fields
             size_dict = self.kelly_sizer.calculate_position_size(
                 signal_confidence=getattr(pos, "ensemble_confidence", 0.6),
                 stop_loss_pct=0.02,
                 profit_target_pct=0.05,
                 current_price=pos.entry_price,
             )
-
             actual_size = size_dict["position_size"]
 
             # Execute with quality gates
@@ -229,6 +223,7 @@ class WeexTradingLoop:
 
             if result.get("status") == "executed":
                 print(f"[WeexTradingLoop] Order placed: {result}")
+                # Store a simplified open position for circuit breaker
                 self.open_positions.append(
                     {
                         "side": 1 if pos.side == "buy" else -1,
@@ -242,6 +237,7 @@ class WeexTradingLoop:
 
         except Exception as e:
             print(f"[WeexTradingLoop] Order placement failed: {e}")
+
 
             
             if result.get("status") == "executed":
