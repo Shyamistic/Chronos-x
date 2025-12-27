@@ -1,17 +1,11 @@
 # backend/api/main.py
 """
-ChronosX FastAPI Backend
-
-Exposes:
-- /health
-- /governance/*
-- /trading/*
-- /backtest/*
-- /agents/*
+ChronosX FastAPI Backend with Live Trading, Regime Analytics, and Governance Logs.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime
 from typing import Optional
@@ -24,8 +18,10 @@ from backend.governance.rule_engine import GovernanceEngine
 from backend.trading.paper_trader import PaperTrader
 from backend.backtester import Backtester
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
+from backend.trading.weex_client import WeexClient
+from backend.trading.weex_live import WeexTradingLoop
 
-app = FastAPI(title="ChronosX API", version="0.1.0")
+app = FastAPI(title="ChronosX API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,14 +30,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Singletons for demo (for prod, use better lifecycle management)
+# Singletons
 governance_engine = GovernanceEngine()
 paper_trader = PaperTrader()
 backtester = Backtester()
-portfolio_mgr = paper_trader.portfolio_manager
+weex_client = WeexClient()
 
-# ---------------------------- MODELS --------------------------------- #
+# Live trading loop (controlled via endpoints)
+weex_trading_loop: Optional[WeexTradingLoop] = None
+live_trading_task: Optional[asyncio.Task] = None
 
+
+# Models
 class RuleToggleRequest(BaseModel):
     rule_name: str
     enabled: bool
@@ -52,14 +52,18 @@ class BacktestRequest(BaseModel):
     start: Optional[datetime] = None
     end: Optional[datetime] = None
 
-# ----------------------------- ROUTES -------------------------------- #
 
+class LiveTradingControl(BaseModel):
+    action: str  # "start" or "stop"
+
+
+# Routes
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
-# Governance -----------------------------------------------------------#
 
+# Governance
 @app.get("/governance/rules")
 async def get_rules():
     return {
@@ -78,17 +82,30 @@ async def override_rule(payload: RuleToggleRequest):
         governance_engine.disable_rule(payload.rule_name)
     return {"status": "ok"}
 
-# Trading / paper trader ----------------------------------------------#
 
+@app.get("/governance/analytics")
+async def governance_analytics():
+    """Return detailed governance trigger history and rule statistics."""
+    return {
+        "trigger_log": paper_trader.governance_trigger_log[-100:],  # last 100
+        "rule_status": governance_engine.get_rule_status(),
+        "total_triggers": len(paper_trader.governance_trigger_log),
+    }
+
+
+# Trading
 @app.get("/trading/summary")
 async def trading_summary():
     metrics = paper_trader.get_summary_metrics()
     equity_curve = paper_trader.get_equity_curve()
     return {
         "metrics": metrics,
+        "regime": paper_trader.current_regime.value,
         "equity_curve": {
-            "timestamps": [t.isoformat() for t in equity_curve.index],
-            "values": equity_curve.tolist(),
+            "timestamps": [t.isoformat() for t in equity_curve.index]
+            if not equity_curve.empty
+            else [],
+            "values": equity_curve.tolist() if not equity_curve.empty else [],
         },
     }
 
@@ -98,8 +115,26 @@ async def trading_trades():
     df = paper_trader.get_trades_df()
     return df.to_dict(orient="records")
 
-# Backtesting ---------------------------------------------------------#
 
+@app.get("/trading/open-position")
+async def get_open_position():
+    if not paper_trader.open_position:
+        return {"open_position": None}
+    
+    pos = paper_trader.open_position
+    return {
+        "open_position": {
+            "timestamp": pos.timestamp.isoformat(),
+            "side": pos.side,
+            "size": pos.size,
+            "entry_price": pos.entry_price,
+            "regime": pos.regime,
+            "contributing_agents": pos.contributing_agents,
+        }
+    }
+
+
+# Backtesting
 @app.post("/backtest/run")
 async def backtest_run(payload: BacktestRequest):
     if not os.path.exists(payload.csv_path):
@@ -119,31 +154,16 @@ async def backtest_run(payload: BacktestRequest):
         "final_balance": result.final_balance,
     }
 
-# DEMO: populate global paper_trader with trades from a CSV backtest --#
 
 @app.post("/demo/populate_trades")
 async def demo_populate_trades(csv_path: str = Body(..., embed=True)):
-    """
-    One-shot helper for demo/BUIDL.
-
-    Runs a backtest on the given CSV and loads the resulting trades
-    and PnL into the global paper_trader instance used by /trading/*.
-    """
     if not os.path.exists(csv_path):
         raise HTTPException(status_code=400, detail="CSV path does not exist")
 
-    # Run backtest using the shared Backtester
     result = backtester.run(csv_path=csv_path)
-
-    # IMPORTANT: backtester currently uses its own internal PaperTrader,
-    # so here we just echo the PnL into the global paper_trader.
-    # For BUIDL demo we don't need exact per-trade reconstruction.
     paper_trader.balance = result.final_balance
     paper_trader.total_pnl = result.total_pnl
     paper_trader.daily_pnl = result.total_pnl
-
-    # Optionally, you can leave trades empty; dashboard will still show PnL & equity.
-    # If you later wire backtester to expose its internal trader, you can copy trades here.
 
     return {
         "status": "ok",
@@ -152,8 +172,94 @@ async def demo_populate_trades(csv_path: str = Body(..., embed=True)):
         "final_balance": result.final_balance,
     }
 
-# Portfolio manager / agents ------------------------------------------#
 
+# Portfolio Manager / Agents
 @app.get("/agents/performance")
 async def agents_performance():
-    return portfolio_mgr.get_stats_snapshot()
+    return paper_trader.portfolio_manager.get_stats_snapshot()
+
+
+@app.get("/agents/regime-stats")
+async def agents_regime_stats():
+    """Return per-regime performance breakdown."""
+    return paper_trader.portfolio_manager.get_regime_stats()
+
+
+# Live Trading Control
+@app.post("/trading/live")
+async def control_live_trading(payload: LiveTradingControl):
+    """
+    Control live trading loop on WEEX.
+    action: "start" or "stop"
+    """
+    global weex_trading_loop, live_trading_task
+
+    action = payload.action.lower()
+
+    if action == "start":
+        if weex_trading_loop is None:
+            weex_trading_loop = WeexTradingLoop(
+                weex_client=weex_client,
+                paper_trader=paper_trader,
+                symbol="cmt_btcusdt",
+                poll_interval=5.0,
+            )
+
+        if live_trading_task is None or live_trading_task.done():
+            live_trading_task = asyncio.create_task(weex_trading_loop.start())
+            return {"status": "live trading started"}
+        else:
+            return {"status": "live trading already running"}
+
+    elif action == "stop":
+        if weex_trading_loop is not None:
+            await weex_trading_loop.stop()
+            if live_trading_task is not None:
+                await live_trading_task
+            live_trading_task = None
+            return {"status": "live trading stopped"}
+        else:
+            return {"status": "live trading not running"}
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+
+@app.get("/trading/live-status")
+async def get_live_status():
+    """Check if live trading is running."""
+    return {
+        "running": weex_trading_loop is not None
+        and weex_trading_loop.running,
+        "current_regime": paper_trader.current_regime.value,
+    }
+
+
+# Analytics / Explainability
+@app.get("/analytics/trade-explanation/{trade_index}")
+async def trade_explanation(trade_index: int):
+    """
+    Explain a specific trade: which agents contributed, what governance rules fired, etc.
+    """
+    df = paper_trader.get_trades_df()
+    if trade_index < 0 or trade_index >= len(df):
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    trade = df.iloc[trade_index]
+    
+    return {
+        "trade_index": trade_index,
+        "timestamp": trade["timestamp"],
+        "side": trade["side"],
+        "size": trade["size"],
+        "entry_price": trade["entry_price"],
+        "exit_price": trade["exit_price"],
+        "pnl": trade["pnl"],
+        "regime": trade["regime"],
+        "contributing_agents": trade["contributing_agents"].split(",")
+        if isinstance(trade["contributing_agents"], str)
+        else [],
+        "ensemble_confidence": trade["ensemble_confidence"],
+        "governance_reason": trade["governance_reason"],
+        "risk_score": trade["risk_score"],
+    }

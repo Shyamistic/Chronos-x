@@ -1,12 +1,6 @@
 # backend/trading/paper_trader.py
 """
-ChronosX Paper Trader
-
-Simulates live trading using:
-- 4 signal agents
-- Thompson Sampling portfolio manager
-- Governance engine
-- Simple PnL accounting
+ChronosX Paper Trader with Live Regime Detection and Dynamic Bandit Weights.
 """
 
 from __future__ import annotations
@@ -26,6 +20,7 @@ from backend.agents.signal_agents import (
     EnsembleAgent,
 )
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
+from backend.agents.regime_detector import RegimeDetector, MarketRegime
 from backend.governance.rule_engine import (
     GovernanceEngine,
     TradingSignal,
@@ -46,10 +41,21 @@ class TradeRecord:
     agent_id: str
     governance_reason: str
     risk_score: float
+    regime: str = "unknown"
+    contributing_agents: List[str] = None
+    ensemble_confidence: float = 0.0
+    
+    def __post_init__(self):
+        if self.contributing_agents is None:
+            self.contributing_agents = []
 
 
 class PaperTrader:
-    def __init__(self, initial_balance: float = 10_000.0, symbol: str = "CMTUSDT"):
+    def __init__(
+        self,
+        initial_balance: float = 10_000.0,
+        symbol: str = "cmt_btcusdt",
+    ):
         self.symbol = symbol
         self.initial_balance = initial_balance
         self.balance = initial_balance
@@ -61,6 +67,7 @@ class PaperTrader:
         self.volatility = 0.0
         self.recent_pnls: List[float] = []
 
+        # Governance
         self.governance = GovernanceEngine()
 
         # Agents
@@ -70,6 +77,7 @@ class PaperTrader:
         self.sentiment_agent = SentimentAgent()
         self.ensemble = EnsembleAgent()
 
+        # Portfolio manager with Thompson Sampling
         self.portfolio_manager = ThompsonSamplingPortfolioManager(
             agent_ids=[
                 "momentum_rsi",
@@ -79,16 +87,21 @@ class PaperTrader:
             ]
         )
 
+        # Regime detection
+        self.regime_detector = RegimeDetector(lookback=20)
+        self.current_regime = MarketRegime.UNKNOWN
+
+        # Trade tracking
         self.trades: List[TradeRecord] = []
         self.open_position: Optional[TradeRecord] = None
+        self.governance_trigger_log: List[dict] = []
 
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
     # Account state helpers
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
 
     def _update_equity(self, mark_price: float):
         if self.open_position:
-            # Unrealized PnL
             direction = 1 if self.open_position.side == "buy" else -1
             pnl_unrealized = (
                 mark_price - self.open_position.entry_price
@@ -124,65 +137,72 @@ class PaperTrader:
         wins = len([p for p in last if p > 0])
         return wins / len(last)
 
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
+    # Regime detection
+    # ================================================================ #
+
+    def _detect_regime(self, candle: Candle) -> MarketRegime:
+        """Detect current market regime."""
+        self.regime_detector.update(candle.close)
+        regime_state = self.regime_detector.detect()
+        self.current_regime = regime_state.current
+        self.portfolio_manager.set_regime(self.current_regime)
+        return self.current_regime
+
+    # ================================================================ #
     # Main simulation APIs
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
 
     async def run_live_simulation(self, candle_stream, hours: int = 24):
-        """
-        Simulate N hours of trading on a candle async generator.
-        """
+        """Simulate N hours of trading on a candle async generator."""
         async for candle in candle_stream:
             await self.process_candle(candle)
 
     async def process_candle(self, candle: Candle):
         """
-        Process a single candle: update agents, decide trade, apply governance,
-        and simulate position.
+        Process a single candle: detect regime, update agents, decide trade,
+        apply governance, and simulate position.
         """
-        # Update volatility (ATR proxy: rolling std of returns)
-        # In a full system, this would ingest ATR from indicators.
-        self.momentum_agent.update(candle)
+        # Detect regime
+        regime = self._detect_regime(candle)
 
-        # Update equity
+        # Update agents
+        self.momentum_agent.update(candle)
         self._update_equity(mark_price=candle.close)
 
-        # Generate signals
+        # Generate signals from all agents
         signals = []
 
-        # Agent 1: Momentum + RSI
         sig1 = self.momentum_agent.generate()
         if sig1:
             signals.append(sig1)
 
-        # Agent 2: ML classifier (requires prior training)
-        # Here we assume external training; can be wired later.
-        # Placeholder: skip if not trained.
-        # Agent 3: Order flow (requires external volume updates)
         sig3 = self.order_flow_agent.generate()
         if sig3:
             signals.append(sig3)
 
-        # Agent 4: Sentiment
         sig4 = self.sentiment_agent.generate()
         if sig4:
             signals.append(sig4)
 
         if not signals:
-            return  # no decision
+            return
 
-        # Ensemble decision
+        # Get dynamic weights from bandit
+        weights = self.portfolio_manager.sample_weights_for_regime(regime)
+        self.ensemble.weights = weights
+
+        # Combine signals
         ensemble_decision = self.ensemble.combine(signals)
         if ensemble_decision.direction == 0 or ensemble_decision.confidence <= 0:
             return
 
         side = "buy" if ensemble_decision.direction > 0 else "sell"
 
-        # Position sizing using simple risk-based sizing
-        # Risk per trade: 0.25% of equity
+        # Position sizing: risk-based
         risk_pct = 0.0025
         risk_amount = self.equity * risk_pct
-        stop_loss_distance = candle.close * 0.005  # 0.5% price move
+        stop_loss_distance = candle.close * 0.005
         size = risk_amount / stop_loss_distance
 
         trading_signal = TradingSignal(
@@ -202,16 +222,21 @@ class PaperTrader:
             trading_signal, account_state
         )
 
+        # Log governance trigger
+        self._log_governance_trigger(
+            candle.timestamp, trading_signal, decision, regime
+        )
+
         if not decision.allow or decision.adjusted_size <= 0:
-            # Governance blocked trade
             return
 
         final_size = decision.adjusted_size
 
-        # Simple rule: close any open position then open new one
+        # Close open position if any
         if self.open_position:
             self._close_position(exit_price=candle.close, timestamp=candle.timestamp)
 
+        # Open new position
         self._open_position(
             side=side,
             size=final_size,
@@ -219,11 +244,14 @@ class PaperTrader:
             timestamp=candle.timestamp,
             governance_reason=decision.reason,
             risk_score=decision.risk_score,
+            regime=regime.value,
+            contributing_agents=[s.agent_id for s in ensemble_decision.agent_signals],
+            ensemble_confidence=ensemble_decision.confidence,
         )
 
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
     # Position management
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
 
     def _open_position(
         self,
@@ -233,6 +261,9 @@ class PaperTrader:
         timestamp: datetime,
         governance_reason: str,
         risk_score: float,
+        regime: str = "unknown",
+        contributing_agents: List[str] = None,
+        ensemble_confidence: float = 0.0,
     ):
         self.open_position = TradeRecord(
             timestamp=timestamp,
@@ -245,6 +276,9 @@ class PaperTrader:
             agent_id="ensemble",
             governance_reason=governance_reason,
             risk_score=risk_score,
+            regime=regime,
+            contributing_agents=contributing_agents or [],
+            ensemble_confidence=ensemble_confidence,
         )
 
     def _close_position(self, exit_price: float, timestamp: datetime):
@@ -252,7 +286,11 @@ class PaperTrader:
             return
 
         direction = 1 if self.open_position.side == "buy" else -1
-        pnl = (exit_price - self.open_position.entry_price) * direction * self.open_position.size
+        pnl = (
+            (exit_price - self.open_position.entry_price)
+            * direction
+            * self.open_position.size
+        )
 
         trade = TradeRecord(
             timestamp=timestamp,
@@ -265,6 +303,9 @@ class PaperTrader:
             agent_id=self.open_position.agent_id,
             governance_reason=self.open_position.governance_reason,
             risk_score=self.open_position.risk_score,
+            regime=self.open_position.regime,
+            contributing_agents=self.open_position.contributing_agents,
+            ensemble_confidence=self.open_position.ensemble_confidence,
         )
 
         self.trades.append(trade)
@@ -273,16 +314,47 @@ class PaperTrader:
         self.daily_pnl += pnl
         self.recent_pnls.append(pnl)
 
-        self.portfolio_manager.record_trade_result(agent_id=trade.agent_id, pnl=pnl)
+        # Record with risk-adjusted reward
+        self.portfolio_manager.record_trade_result(
+            agent_id=trade.agent_id,
+            pnl=pnl,
+            position_size=trade.size,
+            entry_price=trade.entry_price,
+        )
 
         self.open_position = None
 
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
+    # Governance tracking
+    # ================================================================ #
+
+    def _log_governance_trigger(
+        self,
+        timestamp: datetime,
+        signal: TradingSignal,
+        decision: GovernanceDecision,
+        regime: MarketRegime,
+    ):
+        """Log governance rule triggers for analytics."""
+        self.governance_trigger_log.append(
+            {
+                "timestamp": timestamp.isoformat(),
+                "side": signal.side,
+                "size_before": signal.size,
+                "size_after": decision.adjusted_size,
+                "triggered_rules": decision.triggered_rules,
+                "blocked": not decision.allow,
+                "risk_score": decision.risk_score,
+                "regime": regime.value,
+            }
+        )
+
+    # ================================================================ #
     # Metrics / reporting
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
 
     def get_trades_df(self) -> pd.DataFrame:
-        """Return trades as DataFrame for analytics and dashboard."""
+        """Return trades as DataFrame."""
         if not self.trades:
             return pd.DataFrame(
                 columns=[
@@ -296,9 +368,17 @@ class PaperTrader:
                     "agent_id",
                     "governance_reason",
                     "risk_score",
+                    "regime",
+                    "contributing_agents",
+                    "ensemble_confidence",
                 ]
             )
-        return pd.DataFrame([t.__dict__ for t in self.trades])
+        records = []
+        for t in self.trades:
+            r = t.__dict__.copy()
+            r["contributing_agents"] = ",".join(r["contributing_agents"])
+            records.append(r)
+        return pd.DataFrame(records)
 
     def get_equity_curve(self) -> pd.Series:
         """Rebuild equity curve from trades."""
@@ -327,11 +407,14 @@ class PaperTrader:
         total_pnl = float(df["pnl"].sum())
         num_trades = len(df)
         wins = (df["pnl"] > 0).sum()
-        win_rate = wins / num_trades
+        win_rate = wins / num_trades if num_trades > 0 else 0.0
 
-        # Simple daily Sharpe using trade PnL as proxy
         returns = df["pnl"] / self.initial_balance
-        sharpe = returns.mean() / (returns.std() + 1e-8) * (len(returns) ** 0.5)
+        sharpe = (
+            returns.mean() / (returns.std() + 1e-8) * (len(returns) ** 0.5)
+            if len(returns) > 0
+            else 0.0
+        )
 
         equity = self.get_equity_curve()
         if equity.empty:
