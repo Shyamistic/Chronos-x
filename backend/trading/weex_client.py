@@ -28,7 +28,7 @@ class WeexClient:
         api_key: Optional[str] = None,
         api_secret: Optional[str] = None,
         api_passphrase: Optional[str] = None,
-        base_url: str = "https://api.weex.com",
+        base_url: str = "https://api-contract.weex.com",
         timeout: float = 10.0,
     ):
         self.api_key = api_key or os.getenv("WEEX_API_KEY", "")
