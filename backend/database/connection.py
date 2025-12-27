@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from contextlib import contextmanager
 import logging
@@ -42,7 +42,7 @@ def test_connection() -> bool:
     """Test database connectivity."""
     try:
         with get_db() as db:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))  # ✅ Added text() wrapper
         logger.info("✅ Database connection successful")
         return True
     except Exception as e:
