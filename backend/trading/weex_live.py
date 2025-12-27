@@ -1,16 +1,23 @@
 # backend/trading/weex_live.py
 """
-Live WEEX candle stream and trading loop.
+Live candle stream and trading loop.
 
-- WeexLiveStreamer: polls WEEX klines and yields Candle objects.
-- WeexTradingLoop: feeds candles into PaperTrader and places orders.
+Current mode (hackathon-safe):
+- WeexLiveStreamer streams candles from a local CSV as if they were live.
+- WeexTradingLoop feeds candles into PaperTrader and places orders via WeexClient.
+
+Later you can switch stream_candles() back to real WEEX klines once
+the contract kline endpoint is stable.
 """
 
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator, Optional
+
+import pandas as pd
 
 from backend.agents.signal_agents import Candle
 from backend.trading.weex_client import WeexClient
@@ -18,18 +25,22 @@ from backend.trading.weex_client import WeexClient
 
 class WeexLiveStreamer:
     """
-    Streams live candlesticks from WEEX REST API.
+    Streams candlesticks for ChronosX.
 
-    Polls at regular intervals and yields Candle objects.
-    For production, a WebSocket feed would be better, but REST is enough for hackathon.
+    TEMP IMPLEMENTATION:
+      - Replays candles from backend/data/sample_cmt_1h.csv
+        with a fixed delay between bars (poll_interval_sec).
+
+    To switch to real WEEX later: restore stream_candles() to call
+    self._fetch_latest_candle() in a polling loop.
     """
 
     def __init__(
         self,
         weex_client: WeexClient,
-        symbol: str = "cmt_btcusdt",
+        symbol: str = "CMT_BTCUSDT",
         interval: str = "1m",
-        poll_interval_sec: float = 5.0,
+        poll_interval_sec: float = 1.0,
     ):
         self.client = weex_client
         self.symbol = symbol
@@ -39,78 +50,53 @@ class WeexLiveStreamer:
 
     async def stream_candles(self) -> AsyncGenerator[Candle, None]:
         """
-        Async generator that polls WEEX for new candles and yields them.
+        Async generator that streams candles from CSV as if they were live.
         """
-        while True:
+        csv_path = Path("backend/data/sample_cmt_1h.csv")
+        if not csv_path.exists():
+            print(f"[WeexLiveStreamer] CSV not found: {csv_path}")
+            return
+
+        df = pd.read_csv(csv_path)
+        if "timestamp" not in df.columns:
+            raise ValueError("[WeexLiveStreamer] CSV must have 'timestamp' column")
+
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.sort_values("timestamp").reset_index(drop=True)
+
+        print(f"[WeexLiveStreamer] Streaming {len(df)} candles from {csv_path} ...")
+
+        for _, row in df.iterrows():
             try:
-                candle_data = await self._fetch_latest_candle()
-
-                if candle_data and (
-                    self.last_timestamp is None
-                    or candle_data["timestamp"] != self.last_timestamp
-                ):
-                    self.last_timestamp = candle_data["timestamp"]
-                    candle = Candle(
-                        timestamp=datetime.fromtimestamp(
-                            candle_data["timestamp"] / 1000
-                        ),
-                        open=float(candle_data["open"]),
-                        high=float(candle_data["high"]),
-                        low=float(candle_data["low"]),
-                        close=float(candle_data["close"]),
-                        volume=float(candle_data["volume"]),
-                    )
-                    yield candle
-
+                candle = Candle(
+                    timestamp=row["timestamp"],
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                    volume=float(row.get("volume", 0.0)),
+                )
+                yield candle
                 await asyncio.sleep(self.poll_interval_sec)
-
             except Exception as e:
-                print(f"[WeexLiveStreamer] Error in stream_candles: {e}")
-                await asyncio.sleep(self.poll_interval_sec * 2)
+                print(f"[WeexLiveStreamer] Error building candle from row: {e}")
 
+    # KEEP this for future real WEEX integration, but unused for now.
     async def _fetch_latest_candle(self) -> Optional[dict]:
         """
-        Fetch latest candlestick from WEEX.
+        Placeholder for real WEEX kline fetch.
 
-        Uses get_klines(symbol, interval, limit=2) and returns the last bar.
-        Adjust field names to match actual WEEX response.
+        When ready to use real WEEX data, implement this to call:
+          resp = self.client.get_klines(...)
+        and return a dict with keys: timestamp, open, high, low, close, volume.
         """
-        try:
-            resp = self.client.get_klines(
-                symbol=self.symbol,
-                interval=self.interval,
-                limit=2,
-            )
-            # WEEX may return data under "data" or "list" depending on API
-            data = resp.get("data") or resp.get("list") or []
-            if not data:
-                return None
-
-            last = data[-1]
-
-            # Adjust keys to actual WEEX kline format:
-            # Example assumption: {"t": 1700000000000, "o": "...", "h": "...", "l": "...", "c": "...", "v": "..."}
-            ts = last.get("t") or last.get("time") or last.get("timestamp")
-            if ts is None:
-                return None
-
-            return {
-                "timestamp": int(ts),
-                "open": float(last.get("o") or last.get("open")),
-                "high": float(last.get("h") or last.get("high")),
-                "low": float(last.get("l") or last.get("low")),
-                "close": float(last.get("c") or last.get("close")),
-                "volume": float(last.get("v") or last.get("volume") or 0),
-            }
-        except Exception as e:
-            print(f"[WeexLiveStreamer] kline fetch error: {e}")
-            return None
+        return None
 
 
 class WeexTradingLoop:
     """
     Main loop that:
-    1. Streams candles from WEEX (WeexLiveStreamer)
+    1. Streams candles from WeexLiveStreamer (currently CSV playback)
     2. Feeds them into PaperTrader
     3. Places orders on WEEX via WeexClient when PaperTrader opens positions
     """
@@ -119,8 +105,8 @@ class WeexTradingLoop:
         self,
         weex_client: WeexClient,
         paper_trader,
-        symbol: str = "cmt_btcusdt",
-        poll_interval: float = 5.0,
+        symbol: str = "CMT_BTCUSDT",
+        poll_interval: float = 1.0,
     ):
         self.client = weex_client
         self.paper_trader = paper_trader
@@ -135,7 +121,7 @@ class WeexTradingLoop:
     async def start(self):
         """Start the live trading loop."""
         self.running = True
-        print("[WeexTradingLoop] Starting live trading...")
+        print("[WeexTradingLoop] Starting live trading (CSV playback mode)...")
 
         try:
             async for candle in self.streamer.stream_candles():
@@ -178,7 +164,7 @@ class WeexTradingLoop:
             # "buy" -> open long (type=1), "sell" -> open short (type=2)
             type_ = "1" if pos.side == "buy" else "2"
 
-            # Set leverage (e.g. 3x)
+            # Set leverage (e.g. 3x). This calls the real WEEX API.
             await self._set_leverage_async(3)
 
             # Place order
