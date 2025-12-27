@@ -1,4 +1,4 @@
-# backend/trading/weex_live.py (UPDATED)
+# backend/trading/weex_live.py
 """
 Live WEEX trading loop with all infrastructure integrated.
 """
@@ -14,9 +14,10 @@ from backend.risk.circuit_breaker import MultiLayerCircuitBreaker
 from backend.execution.smart_execution import SmartExecutionEngine
 from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
 
+
 class WeexLiveStreamer:
     """Streams live candlesticks from WEEX CONTRACT REST API."""
-    
+
     def __init__(
         self,
         weex_client: WeexClient,
@@ -29,13 +30,13 @@ class WeexLiveStreamer:
         self.granularity = granularity
         self.poll_interval_sec = poll_interval_sec
         self.last_timestamp: Optional[int] = None
-    
+
     async def stream_candles(self) -> AsyncGenerator[Candle, None]:
         """Async generator polling WEEX for candles."""
         while True:
             try:
                 latest = await self._fetch_latest_candle()
-                
+
                 if latest and (
                     self.last_timestamp is None
                     or latest["timestamp"] != self.last_timestamp
@@ -50,13 +51,13 @@ class WeexLiveStreamer:
                         volume=latest["volume"],
                     )
                     yield candle
-                
+
                 await asyncio.sleep(self.poll_interval_sec)
-            
+
             except Exception as e:
                 print(f"[WeexLiveStreamer] Error: {e}")
                 await asyncio.sleep(self.poll_interval_sec * 2)
-    
+
     async def _fetch_latest_candle(self) -> Optional[dict]:
         """Fetch latest candlestick from WEEX."""
         try:
@@ -75,7 +76,11 @@ class WeexLiveStreamer:
                     if "lists" in resp["data"]:
                         data = resp["data"]["lists"]
                     else:
-                        data = resp["data"].get("candles") or resp["data"].get("list") or []
+                        data = (
+                            resp["data"].get("candles")
+                            or resp["data"].get("list")
+                            or []
+                        )
                 else:
                     data = resp.get("data") or resp.get("candles") or []
             else:
@@ -130,12 +135,16 @@ class WeexLiveStreamer:
             return None
 
 
-# backend/trading/weex_live.py
-
 class WeexTradingLoop:
     """Main trading loop integrating all components."""
 
-    def __init__(self, weex_client: WeexClient, paper_trader, symbol: str = "cmt_btcusdt", poll_interval: float = 5.0):
+    def __init__(
+        self,
+        weex_client: WeexClient,
+        paper_trader,
+        symbol: str = "cmt_btcusdt",
+        poll_interval: float = 5.0,
+    ):
         self.client = weex_client
         self.paper_trader = paper_trader
         self.symbol = symbol
@@ -147,13 +156,17 @@ class WeexTradingLoop:
         )
 
         # Initialize infrastructure
-        self.kelly_sizer = KellyCriterionSizer(account_equity=50000, max_risk_per_trade=0.02)
+        self.kelly_sizer = KellyCriterionSizer(
+            account_equity=50000, max_risk_per_trade=0.02
+        )
         self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)
-        self.smart_execution = SmartExecutionEngine(weex_client, max_slippage_pct=0.003, max_latency_ms=1500)
+        self.smart_execution = SmartExecutionEngine(
+            weex_client, max_slippage_pct=0.003, max_latency_ms=1500
+        )
 
         self.running = False
         self.current_pnl = 0.0
-        self.open_positions = []
+        self.open_positions: List[dict] = []
 
     async def start(self):
         """Start live trading loop."""
@@ -177,7 +190,10 @@ class WeexTradingLoop:
                     leverage_ratio=1.5,
                     free_margin_pct=0.8,
                 ):
-                    print(f"[WeexTradingLoop] Trading paused: {self.circuit_breaker.break_reason}")
+                    print(
+                        f"[WeexTradingLoop] Trading paused: "
+                        f"{self.circuit_breaker.break_reason}"
+                    )
                     continue
 
                 # Execute if position exists
@@ -197,8 +213,8 @@ class WeexTradingLoop:
         print("[WeexTradingLoop] Stopping...")
         self.running = False
 
-        async def _execute_position(self):
-          "Execute trade with all infrastructure."""
+    async def _execute_position(self):
+        """Execute trade with all infrastructure."""
         pos = self.paper_trader.open_position
         if not pos:
             return
@@ -217,7 +233,7 @@ class WeexTradingLoop:
             result = self.smart_execution.execute_with_quality_gates(
                 symbol=self.symbol,
                 size=actual_size,
-                side=pos.side,          # "buy" or "sell"
+                side=pos.side,  # "buy" or "sell"
                 entry_price=pos.entry_price,
             )
 
