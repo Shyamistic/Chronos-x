@@ -75,17 +75,21 @@ class WeexLiveStreamer:
                 print(f"[WeexLiveStreamer] Error: {e}")
                 await asyncio.sleep(self.poll_interval_sec * 2)
 
-    async def _fetch_latest_candle(self) -> Optional[dict]:
-        """
-        Fetch latest candlestick from WEEX.
-        
-        This is a placeholder; integrate with actual WEEX klines endpoint.
-        For now, returns mock data or calls a real endpoint if available.
-        """
-        # TODO: Implement /capi/v2/market/kline endpoint in WeexClient
-        # For now, return None to indicate not yet implemented
+async def _fetch_latest_candle(self) -> Optional[dict]:
+    resp = self.client.get_klines(self.symbol, interval=self.interval, limit=2)
+    data = resp.get("data") or resp.get("list") or []
+    if not data:
         return None
-
+    last = data[-1]
+    # Adjust keys according to WEEX docs
+    return {
+        "timestamp": int(last["t"]),      # or "time"
+        "open": last["o"],
+        "high": last["h"],
+        "low": last["l"],
+        "close": last["c"],
+        "volume": last["v"],
+    }
 
 class WeexTradingLoop:
     """

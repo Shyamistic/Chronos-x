@@ -127,6 +127,12 @@ class WeexClient:
             "match_price": match_price,
             "client_oid": f"chronosx-{int(time.time()*1000)}",
         }
+    def get_klines(self, symbol: str, interval: str = "1m", limit: int = 2):
+        return self._request(
+        "GET",
+        "/capi/v2/market/kline",
+        params={"symbol": symbol, "interval": interval, "limit": limit},
+    )
 
         # Only include price for LIMIT orders
         if match_price == "0":

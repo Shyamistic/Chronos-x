@@ -188,25 +188,36 @@ async def agents_regime_stats():
 
 # Live Trading Control
 @app.post("/trading/live")
-async def control_live_trading(payload: LiveTradingMode):
+async def control_live_trading(payload: LiveTradingControl = Body(...)):
     global weex_trading_loop, live_trading_task
 
     action = payload.action.lower()
 
     if action == "start":
-        if payload.mode == "csv":
-            # CSV playback mode
-            if live_trading_task is None or live_trading_task.done():
-                async def run_csv():
-                    async for candle in csv_candle_stream(
-                        payload.csv_path or "backend/data/sample_cmt_1h.csv",
-                        delay_sec=payload.delay_sec,
-                    ):
-                        await paper_trader.process_candle(candle)
-                live_trading_task = asyncio.create_task(run_csv())
-                return {"status": "csv live started"}
-            else:
-                return {"status": "live trading already running"}
+        if weex_trading_loop is None:
+            weex_trading_loop = WeexTradingLoop(
+                weex_client=weex_client,
+                paper_trader=paper_trader,
+                symbol="cmt_btcusdt",
+                poll_interval=5.0,
+            )
+
+        if live_trading_task is None or live_trading_task.done():
+            live_trading_task = asyncio.create_task(weex_trading_loop.start())
+            return {"status": "live trading started"}
+        else:
+            return {"status": "live trading already running"}
+
+    elif action == "stop":
+        if weex_trading_loop is not None:
+            await weex_trading_loop.stop()
+        if live_trading_task is not None:
+            live_trading_task.cancel()
+            live_trading_task = None
+        return {"status": "live trading stopped"}
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action")
 
         # WEEX mode (existing)
         if weex_trading_loop is None:
