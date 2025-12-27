@@ -1,72 +1,126 @@
-# backend/database/trade_repository.py
 from sqlalchemy import text
-from typing import List, Dict
+from typing import List, Dict, Optional
+from datetime import datetime
+import logging
 from .connection import get_db
 
+logger = logging.getLogger(__name__)
+
 class TradeRepository:
-    """Persist trades to PostgreSQL."""
+    """Repository for trade persistence."""
     
     @staticmethod
-    def save_trade(trade: Dict):
+    def save_trade(trade: Dict) -> bool:
         """Insert trade into database."""
-        with get_db() as db:
-            db.execute(
-                text("""
-                    INSERT INTO trades (
-                        order_id, symbol, side, size, entry_price, 
-                        exit_price, pnl, slippage, execution_latency_ms,
-                        agent_signals, governance_approval, status
-                    ) VALUES (
-                        :order_id, :symbol, :side, :size, :entry_price,
-                        :exit_price, :pnl, :slippage, :latency,
-                        :signals, :governance, :status
-                    )
-                """),
-                {
-                    "order_id": trade["order_id"],
-                    "symbol": trade.get("symbol", "cmt_btcusdt"),
-                    "side": trade["side"],
-                    "size": trade["size"],
-                    "entry_price": trade["entry_price"],
-                    "exit_price": trade.get("exit_price"),
-                    "pnl": trade.get("pnl", 0),
-                    "slippage": trade.get("slippage", 0),
-                    "latency": trade.get("execution_latency_ms", 0),
-                    "signals": trade.get("agent_signals"),
-                    "governance": trade.get("governance_approval"),
-                    "status": trade.get("status", "EXECUTED"),
-                }
-            )
+        try:
+            with get_db() as db:
+                db.execute(
+                    text("""
+                        INSERT INTO trades (
+                            order_id, symbol, side, size, entry_price, 
+                            exit_price, pnl, slippage, execution_latency_ms,
+                            agent_signals, governance_approval, status
+                        ) VALUES (
+                            :order_id, :symbol, :side, :size, :entry_price,
+                            :exit_price, :pnl, :slippage, :latency,
+                            :signals::jsonb, :governance::jsonb, :status
+                        )
+                        ON CONFLICT (order_id) DO NOTHING
+                    """),
+                    {
+                        "order_id": trade.get("order_id"),
+                        "symbol": trade.get("symbol", "cmt_btcusdt"),
+                        "side": trade.get("side"),
+                        "size": float(trade.get("size", 0)),
+                        "entry_price": float(trade.get("entry_price", 0)),
+                        "exit_price": trade.get("exit_price"),
+                        "pnl": float(trade.get("pnl", 0)),
+                        "slippage": float(trade.get("slippage", 0)) if trade.get("slippage") else None,
+                        "latency": int(trade.get("execution_latency_ms", 0)) if trade.get("execution_latency_ms") else None,
+                        "signals": str(trade.get("agent_signals", {})),
+                        "governance": str(trade.get("governance_approval", {})),
+                        "status": trade.get("status", "EXECUTED"),
+                    }
+                )
+                logger.info(f"✅ Persisted trade {trade.get('order_id')} to database")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Failed to persist trade: {e}")
+            return False
     
     @staticmethod
     def get_all_trades(limit: int = 100) -> List[Dict]:
         """Retrieve recent trades."""
-        with get_db() as db:
-            result = db.execute(
-                text("""
-                    SELECT 
-                        timestamp, order_id, symbol, side, size,
-                        entry_price, exit_price, pnl, slippage,
-                        execution_latency_ms, status
-                    FROM trades
-                    ORDER BY timestamp DESC
-                    LIMIT :limit
-                """),
-                {"limit": limit}
-            )
-            return [dict(row._mapping) for row in result]
+        try:
+            with get_db() as db:
+                result = db.execute(
+                    text("""
+                        SELECT 
+                            timestamp, order_id, symbol, side, size,
+                            entry_price, exit_price, pnl, slippage,
+                            execution_latency_ms, status
+                        FROM trades
+                        ORDER BY timestamp DESC
+                        LIMIT :limit
+                    """),
+                    {"limit": limit}
+                )
+                
+                trades = []
+                for row in result:
+                    trades.append({
+                        "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                        "order_id": row.order_id,
+                        "symbol": row.symbol,
+                        "side": row.side,
+                        "size": float(row.size) if row.size else 0,
+                        "entry_price": float(row.entry_price) if row.entry_price else 0,
+                        "exit_price": float(row.exit_price) if row.exit_price else None,
+                        "pnl": float(row.pnl) if row.pnl else 0,
+                        "slippage": float(row.slippage) if row.slippage else None,
+                        "execution_latency_ms": int(row.execution_latency_ms) if row.execution_latency_ms else None,
+                        "status": row.status,
+                    })
+                
+                return trades
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve trades: {e}")
+            return []
     
     @staticmethod
     def get_performance_summary() -> Dict:
         """Calculate aggregate metrics."""
-        with get_db() as db:
-            result = db.execute(text("""
-                SELECT 
-                    COUNT(*) as total_trades,
-                    SUM(pnl) as total_pnl,
-                    AVG(CASE WHEN pnl > 0 THEN 1.0 ELSE 0.0 END) as win_rate,
-                    MAX(timestamp) as last_trade_at
-                FROM trades
-            """))
-            row = result.fetchone()
-            return dict(row._mapping) if row else {}
+        try:
+            with get_db() as db:
+                result = db.execute(text("""
+                    SELECT 
+                        COUNT(*) as total_trades,
+                        COALESCE(SUM(pnl), 0) as total_pnl,
+                        COALESCE(AVG(CASE WHEN pnl > 0 THEN 1.0 ELSE 0.0 END), 0) as win_rate,
+                        MAX(timestamp) as last_trade_at
+                    FROM trades
+                """))
+                
+                row = result.fetchone()
+                if row:
+                    return {
+                        "total_trades": int(row.total_trades),
+                        "total_pnl": float(row.total_pnl),
+                        "win_rate": float(row.win_rate),
+                        "last_trade_at": row.last_trade_at,
+                    }
+                else:
+                    return {
+                        "total_trades": 0,
+                        "total_pnl": 0.0,
+                        "win_rate": 0.0,
+                        "last_trade_at": None,
+                    }
+        except Exception as e:
+            logger.error(f"❌ Failed to get performance summary: {e}")
+            return {
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "win_rate": 0.0,
+                "last_trade_at": None,
+            }

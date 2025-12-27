@@ -1,5 +1,12 @@
-# backend/database/schema.sql
-CREATE TABLE trades (
+# Create the database directory structure
+mkdir -p backend/database
+
+# Create schema file
+cat > backend/database/schema.sql << 'EOF'
+-- ChronosX Trading Database Schema
+
+-- Trades table
+CREATE TABLE IF NOT EXISTS trades (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     order_id VARCHAR(50) UNIQUE NOT NULL,
@@ -8,7 +15,7 @@ CREATE TABLE trades (
     size DECIMAL(18, 8) NOT NULL,
     entry_price DECIMAL(18, 2) NOT NULL,
     exit_price DECIMAL(18, 2),
-    pnl DECIMAL(18, 2),
+    pnl DECIMAL(18, 2) DEFAULT 0,
     slippage DECIMAL(10, 6),
     execution_latency_ms INTEGER,
     agent_signals JSONB,
@@ -16,7 +23,8 @@ CREATE TABLE trades (
     status VARCHAR(20) NOT NULL
 );
 
-CREATE TABLE metrics_snapshots (
+-- Metrics snapshots table
+CREATE TABLE IF NOT EXISTS metrics_snapshots (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     total_pnl DECIMAL(18, 2),
@@ -27,7 +35,8 @@ CREATE TABLE metrics_snapshots (
     snapshot_data JSONB
 );
 
-CREATE TABLE system_events (
+-- System events table
+CREATE TABLE IF NOT EXISTS system_events (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     event_type VARCHAR(50) NOT NULL,
@@ -36,6 +45,26 @@ CREATE TABLE system_events (
     metadata JSONB
 );
 
-CREATE INDEX idx_trades_timestamp ON trades(timestamp DESC);
-CREATE INDEX idx_trades_symbol ON trades(symbol);
-CREATE INDEX idx_system_events_timestamp ON system_events(timestamp DESC);
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id);
+CREATE INDEX IF NOT EXISTS idx_system_events_timestamp ON system_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON metrics_snapshots(timestamp DESC);
+
+-- Views for quick analytics
+CREATE OR REPLACE VIEW daily_performance AS
+SELECT 
+    DATE(timestamp) as trade_date,
+    COUNT(*) as num_trades,
+    SUM(pnl) as daily_pnl,
+    AVG(CASE WHEN pnl > 0 THEN 1.0 ELSE 0.0 END) as win_rate,
+    AVG(slippage) as avg_slippage,
+    AVG(execution_latency_ms) as avg_latency_ms
+FROM trades
+GROUP BY DATE(timestamp)
+ORDER BY trade_date DESC;
+EOF
+
+# Apply schema
+PGPASSWORD='ChronosX2025!SecurePass' psql -U chronosx -d chronosx -h localhost -f backend/database/schema.sql
