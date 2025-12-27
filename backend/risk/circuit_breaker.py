@@ -107,6 +107,16 @@ class MultiLayerCircuitBreaker:
         
         return False
     
+    def is_trading_allowed(self) -> bool:
+        """Check if trading is allowed (circuit breaker not triggered)."""
+        return not self.circuit_broken
+    
+    def update_state(self, trade_pnl: float, open_positions: int, leverage_ratio: float):
+        """Update circuit breaker state after trade."""
+        self.pnl_daily += trade_pnl
+        self.pnl_weekly += trade_pnl
+        # Additional state updates can be added here
+    
     def can_reactivate(self) -> bool:
         """Reactivate after 5 profitable days."""
         if self.circuit_broken and self.profitable_days_counter >= self.reactivation_min_profitable_days:
