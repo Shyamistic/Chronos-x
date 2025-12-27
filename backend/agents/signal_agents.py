@@ -362,7 +362,6 @@ class SentimentAgent:
 # ============================================================
 # Ensemble Agent (soft voting, regime-aware)
 # ============================================================
-
 class EnsembleAgent:
     """
     Weighted majority vote ensemble over all agents.
@@ -370,11 +369,11 @@ class EnsembleAgent:
     Uses confidence-weighted, risk-aware soft voting:
     - Rewards agreement between independent agents.
     - Penalizes strong disagreement (reduces confidence, not hard zero).
-    - Allows PaperTrader / governance to decide final risk.
+    - Allows governance to decide final risk.
     """
 
     def __init__(self, weights: Optional[Dict[str, float]] = None):
-        # Base weights; can be overridden dynamically (e.g., Thompson sampling)
+        # Base weights; can be overridden dynamically by portfolio manager
         self.weights = weights or {
             "momentum_rsi": 1.0,
             "ml_classifier": 1.0,
@@ -393,19 +392,14 @@ class EnsembleAgent:
                 direction=0,
                 confidence=0.0,
                 agent_signals=[],
-                metadata={
-                    "raw_score": 0.0,
-                    "disagreement_penalty": 0.0,
-                },
+                metadata={"raw_score": 0.0, "disagreement_penalty": 0.0},
             )
 
-        # Compute weighted direction score and average confidence
         total_weight = 0.0
         weighted_dir = 0.0
         weighted_conf = 0.0
-
-        directions = []
-        confidences = []
+        directions: List[int] = []
+        confidences: List[float] = []
 
         for sig in signals:
             if sig.direction == 0:
@@ -422,11 +416,58 @@ class EnsembleAgent:
                 direction=0,
                 confidence=0.0,
                 agent_signals=signals,
+                metadata={"raw_score": 0.0, "disagreement_penalty": 0.0},
+            )
+
+        avg_dir = weighted_dir / total_weight
+        avg_conf = max(0.0, min(1.0, weighted_conf / total_weight))
+
+        # Disagreement penalty: if agents point in opposite directions,
+        # reduce effective confidence instead of forcing flat.
+        if len(directions) > 1:
+            dir_array = np.array(directions, dtype=float)
+            disagreement = 1.0 - abs(dir_array.mean())
+        else:
+            disagreement = 0.0
+
+        effective_conf = avg_conf * (1.0 - 0.5 * disagreement)
+
+        # Hard veto only if really weak
+        if abs(avg_dir) < 0.1 or effective_conf < 0.25:
+            return EnsembleDecision(
+                direction=0,
+                confidence=effective_conf,
+                agent_signals=signals,
                 metadata={
-                    "raw_score": 0.0,
-                    "disagreement_penalty": 0.0,
+                    "raw_score": float(avg_dir),
+                    "disagreement_penalty": float(disagreement),
                 },
             )
+
+        final_dir = 1 if avg_dir > 0 else -1
+
+        # Optional regime tilt
+        regime_factor = 1.0
+        if self.current_regime:
+            r = self.current_regime.lower()
+            if r == "trend" and any(
+                s.agent_id in ("momentum_rsi", "ml_classifier") for s in signals
+            ):
+                regime_factor = 1.1
+            elif r == "mean_reversion":
+                regime_factor = 0.95
+
+        final_conf = max(0.0, min(1.0, effective_conf * regime_factor))
+
+        return EnsembleDecision(
+            direction=final_dir,
+            confidence=final_conf,
+            agent_signals=signals,
+            metadata={
+                "raw_score": float(avg_dir),
+                "disagreement_penalty": float(disagreement),
+            },
+        )
 
         avg_dir = weighted_dir / total_weight
         avg_conf = max(0.0, min(1.0, weighted_conf / total_weight))
