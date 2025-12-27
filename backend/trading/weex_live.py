@@ -70,9 +70,9 @@ class WeexLiveStreamer:
         """
         Fetch latest candlestick from WEEX contract candles API.
 
-        Contract Get Candlestick Data returns either:
-          - a list of candles: [[ts, open, high, low, close, vol], ...]
-          - or {"data": [...]} depending on environment. [web:88]
+        Contract Get Candlestick Data can return:
+          - a list of candles: [[ts, open, high, low, close, vol], ...], or
+          - an object with "data"/"candles" keys. [web:88]
         """
         try:
             resp = self.client.get_candles(
@@ -83,7 +83,7 @@ class WeexLiveStreamer:
 
             # If resp is already a list, use it directly; otherwise look for keys.
             if isinstance(resp, list):
-                data = resp
+                data: List = resp
             else:
                 data = resp.get("data") or resp.get("candles") or []
 
@@ -114,7 +114,7 @@ class WeexLiveStreamer:
                 "open": open_,
                 "high": high,
                 "low": low,
-                "close": close_,
+                "close": close,
                 "volume": vol,
             }
         except Exception as e:
@@ -192,7 +192,6 @@ class WeexTradingLoop:
 
         try:
             # Map "buy"/"sell" to WEEX contract type strings.
-            # For demo: open new position in direction of signal.
             type_ = "open_long" if pos.side == "buy" else "open_short"
 
             # Set leverage (e.g. 3x). This calls the real WEEX API.
@@ -225,4 +224,3 @@ class WeexTradingLoop:
         await loop.run_in_executor(
             None, self.client.set_leverage, self.symbol, leverage
         )
-
