@@ -13,7 +13,7 @@ from backend.risk.kelly_criterion import KellyCriterionSizer
 from backend.risk.circuit_breaker import MultiLayerCircuitBreaker
 from backend.execution.smart_execution import SmartExecutionEngine
 from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
-
+from backend.config import TradingConfig
 
 class WeexLiveStreamer:
     """Streams live candlesticks from WEEX CONTRACT REST API."""
@@ -260,3 +260,42 @@ class WeexTradingLoop:
         await loop.run_in_executor(
             None, self.client.set_leverage, self.symbol, leverage
         )
+class WeexTradingLoop:
+    async def _execute_trade(self, trade_signal):
+        """Execute trade with optional governance."""
+        
+        trade = {
+            "symbol": self.symbol,
+            "side": "buy" if trade_signal["dir"] == 1 else "sell",
+            "size": trade_signal["size"],
+            "price": trade_signal["price"],
+            "confidence": trade_signal["confidence"],
+            "timestamp": int(time.time() * 1000)
+        }
+        
+        # Skip confidence filter
+        if trade["confidence"] < TradingConfig.MIN_CONFIDENCE:
+            print(f"[WeexTradingLoop] REJECTED: confidence {trade['confidence']} < {TradingConfig.MIN_CONFIDENCE}")
+            return {"error": "confidence_too_low"}
+        
+        # DUAL MODE: Governance check (conditional)
+        if not TradingConfig.FORCE_EXECUTE_MODE:
+            # Production mode: require MPC approval
+            governance_result = self.mpc_governance.submit_trade(trade)
+            if not governance_result["approved"]:
+                print(f"[WeexTradingLoop] MPC REJECTED: {governance_result['reason']}")
+                return {"error": "governance_rejected"}
+            print(f"[WeexTradingLoop] MPC APPROVED by {governance_result['approvers']}")
+        else:
+            # Alpha testing mode: skip governance, execute immediately
+            print(f"[WeexTradingLoop] ALPHA MODE: Executing without MPC (force_execute=true)")
+        
+        # Execute with quality gates (always run)
+        execution_result = await self.smart_execution.execute_with_quality_gates(
+            symbol=trade["symbol"],
+            side=trade["side"],
+            size=trade["size"],
+            price=trade["price"]
+        )
+        
+        return execution_result
