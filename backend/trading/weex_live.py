@@ -1,12 +1,7 @@
-# backend/trading/weex_live.py
+# backend/trading/weex_live.py (UPDATED)
 """
-Live WEEX candle stream and trading loop (real market).
-
-- WeexLiveStreamer: polls WEEX contract candles and yields Candle objects.
-- WeexTradingLoop: feeds candles into PaperTrader and places orders on WEEX.
+Live WEEX trading loop with all infrastructure integrated.
 """
-
-from __future__ import annotations
 
 import asyncio
 from datetime import datetime
@@ -14,16 +9,14 @@ from typing import AsyncGenerator, Optional, List
 
 from backend.agents.signal_agents import Candle
 from backend.trading.weex_client import WeexClient
-
+from backend.risk.kelly_criterion import KellyCriterionSizer
+from backend.risk.circuit_breaker import MultiLayerCircuitBreaker
+from backend.execution.smart_execution import SmartExecutionEngine
+from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
 
 class WeexLiveStreamer:
-    """
-    Streams live candlesticks from WEEX CONTRACT REST API.
-
-    Uses:
-      GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m [web:88]
-    """
-
+    """Streams live candlesticks from WEEX CONTRACT REST API."""
+    
     def __init__(
         self,
         weex_client: WeexClient,
@@ -36,15 +29,13 @@ class WeexLiveStreamer:
         self.granularity = granularity
         self.poll_interval_sec = poll_interval_sec
         self.last_timestamp: Optional[int] = None
-
+    
     async def stream_candles(self) -> AsyncGenerator[Candle, None]:
-        """
-        Async generator that polls WEEX for new candles and yields them.
-        """
+        """Async generator polling WEEX for candles."""
         while True:
             try:
                 latest = await self._fetch_latest_candle()
-
+                
                 if latest and (
                     self.last_timestamp is None
                     or latest["timestamp"] != self.last_timestamp
@@ -59,40 +50,32 @@ class WeexLiveStreamer:
                         volume=latest["volume"],
                     )
                     yield candle
-
+                
                 await asyncio.sleep(self.poll_interval_sec)
-
+            
             except Exception as e:
-                print(f"[WeexLiveStreamer] Error in stream_candles: {e}")
+                print(f"[WeexLiveStreamer] Error: {e}")
                 await asyncio.sleep(self.poll_interval_sec * 2)
-
+    
     async def _fetch_latest_candle(self) -> Optional[dict]:
-        """
-        Fetch latest candlestick from WEEX contract candles API.
-
-        Contract Get Candlestick Data can return:
-          - a list of candles: [[ts, open, high, low, close, vol], ...], or
-          - an object with "data"/"candles" keys. [web:88]
-        """
+        """Fetch latest candlestick from WEEX."""
         try:
             resp = self.client.get_candles(
                 symbol=self.symbol,
                 granularity=self.granularity,
                 limit=2,
             )
-
-            # If resp is already a list, use it directly; otherwise look for keys.
+            
             if isinstance(resp, list):
-                data: List = resp
+                data = resp
             else:
                 data = resp.get("data") or resp.get("candles") or []
-
+            
             if not data:
                 return None
-
+            
             last = data[-1]
-
-            # Support both object and list formats
+            
             if isinstance(last, dict):
                 ts = int(last.get("ts") or last.get("timestamp"))
                 open_ = float(last.get("open"))
@@ -101,14 +84,13 @@ class WeexLiveStreamer:
                 close = float(last.get("close"))
                 vol = float(last.get("volume") or last.get("vol") or 0)
             else:
-                # assume [ts, open, high, low, close, volume]
-                ts = int(last[0])
-                open_ = float(last[1])
-                high = float(last[2])
-                low = float(last[3])
-                close = float(last[4])
-                vol = float(last[5]) if len(last) > 5 else 0.0
-
+                ts = int(last)
+                open_ = float(last)
+                high = float(last)
+                low = float(last)
+                close = float(last)
+                vol = float(last) if len(last) > 5 else 0.0
+            
             return {
                 "timestamp": ts,
                 "open": open_,
@@ -118,18 +100,13 @@ class WeexLiveStreamer:
                 "volume": vol,
             }
         except Exception as e:
-            print(f"[WeexLiveStreamer] candles fetch error: {e}")
+            print(f"[WeexLiveStreamer] Candles fetch error: {e}")
             return None
 
 
 class WeexTradingLoop:
-    """
-    Main loop that:
-    1. Streams candles from WEEX (WeexLiveStreamer)
-    2. Feeds them into PaperTrader
-    3. Places orders on WEEX via WeexClient when PaperTrader opens positions
-    """
-
+    """Main trading loop integrating all components."""
+    
     def __init__(
         self,
         weex_client: WeexClient,
@@ -146,27 +123,46 @@ class WeexTradingLoop:
             granularity="1m",
             poll_interval_sec=poll_interval,
         )
+        
+        # Initialize infrastructure
+        self.kelly_sizer = KellyCriterionSizer(account_equity=50000, max_risk_per_trade=0.02)
+        self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)
+        self.smart_execution = SmartExecutionEngine(weex_client, max_slippage_pct=0.003, max_latency_ms=300)
+        self.monitor = RealTimePerformanceMonitor()
+        
         self.running = False
-
+        self.current_pnl = 0.0
+        self.open_positions = []
+    
     async def start(self):
-        """Start the live trading loop."""
+        """Start live trading loop."""
         self.running = True
         print("[WeexTradingLoop] Starting live trading (REAL WEEX)...")
-
+        
         try:
             async for candle in self.streamer.stream_candles():
                 if not self.running:
                     break
-
+                
                 print(f"[WeexTradingLoop] Candle: {candle.timestamp} close={candle.close}")
-
+                
                 # Feed into paper trader
                 await self.paper_trader.process_candle(candle)
-
-                # If paper_trader opened a new position, send an order
+                
+                # Check circuit breaker
+                if self.circuit_breaker.check_circuit_breaker(
+                    current_pnl=self.current_pnl,
+                    open_positions=self.open_positions,
+                    leverage_ratio=1.5,
+                    free_margin_pct=0.8,
+                ):
+                    print(f"[WeexTradingLoop] Trading paused: {self.circuit_breaker.break_reason}")
+                    continue
+                
+                # Execute if position exists
                 if self.paper_trader.open_position:
                     await self._execute_position()
-
+        
         except asyncio.CancelledError:
             print("[WeexTradingLoop] Cancelled.")
         except Exception as e:
@@ -174,52 +170,48 @@ class WeexTradingLoop:
         finally:
             self.running = False
             print("[WeexTradingLoop] Loop exited.")
-
+    
     async def stop(self):
-        """Stop the live trading loop."""
-        print("[WeexTradingLoop] Stopping live trading...")
+        """Stop live trading loop."""
+        print("[WeexTradingLoop] Stopping...")
         self.running = False
-
+    
     async def _execute_position(self):
-        """
-        Execute current open position on WEEX.
-
-        Maps PaperTrader open_position to a WEEX contract order.
-        """
+        """Execute trade with all infrastructure."""
         pos = self.paper_trader.open_position
         if not pos:
             return
-
+        
         try:
-            # Map "buy"/"sell" to WEEX contract type strings.
-            type_ = "open_long" if pos.side == "buy" else "open_short"
-
-            # Set leverage (e.g. 3x). This calls the real WEEX API.
-            await self._set_leverage_async(3)
-
-            # Place order
-            order_resp = self.client.place_order(
-                symbol=self.symbol,
-                size=str(pos.size),
-                type_=type_,
-                price=str(pos.entry_price),
-                match_price="0",  # limit order at entry_price
+            # Size position
+            size_dict = self.kelly_sizer.calculate_position_size(
+                signal_confidence=pos.get("confidence", 0.6),
+                stop_loss_pct=0.02,
+                profit_target_pct=0.05,
+                current_price=pos.get("entry_price", 87500),
             )
-
-            print(f"[WeexTradingLoop] Order placed: {order_resp}")
-
-            # Optionally store order_id on the position for reconciliation
-            if isinstance(order_resp, dict):
-                data = order_resp.get("data") or {}
-                order_id = data.get("order_id") or data.get("id")
-                if order_id is not None:
-                    setattr(pos, "order_id", order_id)
-
+            
+            actual_size = size_dict["position_size"]
+            
+            # Execute with quality gates
+            result = self.smart_execution.execute_with_quality_gates(
+                symbol=self.symbol,
+                size=actual_size,
+                side=pos.get("side", "buy"),
+                entry_price=pos.get("entry_price", 87500),
+            )
+            
+            if result.get("status") == "executed":
+                print(f"[WeexTradingLoop] Order placed: {result}")
+                self.open_positions.append(pos)
+            else:
+                print(f"[WeexTradingLoop] Order rejected: {result}")
+        
         except Exception as e:
             print(f"[WeexTradingLoop] Order placement failed: {e}")
-
+    
     async def _set_leverage_async(self, leverage: int):
-        """Set leverage asynchronously (wraps blocking HTTP in a thread pool)."""
+        """Set leverage asynchronously."""
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None, self.client.set_leverage, self.symbol, leverage

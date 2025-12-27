@@ -28,6 +28,9 @@ from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
 from backend.trading.weex_client import WeexClient
 from backend.trading.weex_live import WeexTradingLoop
 
+# If you wired RealTimePerformanceMonitor into PaperTrader, you can expose it later
+# from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
+
 app = FastAPI(title="ChronosX API", version="0.2.0")
 
 app.add_middleware(
