@@ -99,6 +99,10 @@ class PaperTrader:
         # Optional callback: will be set by API layer for monitor
         self.on_trade_closed = None
 
+        # Track last ensemble decision for live trading loop
+        self.last_ensemble_decision = None
+        self.last_regime = None
+
     # ================================================================ #
     # Account state helpers
     # ================================================================ #
@@ -228,6 +232,10 @@ class PaperTrader:
             f"[PaperTrader] Ensemble decision: dir={ensemble_decision.direction}, "
             f"conf={ensemble_decision.confidence:.3f}"
         )
+
+        # Cache for external consumers (WeexTradingLoop)
+        self.last_ensemble_decision = ensemble_decision
+        self.last_regime = regime
 
         if ensemble_decision.direction == 0 or ensemble_decision.confidence <= 0:
             print("[PaperTrader] Ensemble vetoed trade (flat or zero confidence)")
@@ -485,4 +493,27 @@ class PaperTrader:
             "win_rate": float(win_rate),
             "sharpe": float(sharpe),
             "max_drawdown": max_dd,
+        }
+    def get_ensemble_signal(self):
+        """
+        Return latest ensemble signal snapshot for external consumers.
+        
+        Structure:
+        {
+            "dir": int,
+            "conf": float,
+            "regime": str,
+            "contributing_agents": List[str]
+        }
+        """
+        if self.last_ensemble_decision is None:
+            return None
+
+        return {
+            "dir": self.last_ensemble_decision.direction,
+            "conf": self.last_ensemble_decision.confidence,
+            "regime": self.last_regime.value if self.last_regime else "unknown",
+            "contributing_agents": [
+                s.agent_id for s in self.last_ensemble_decision.agent_signals
+            ],
         }
