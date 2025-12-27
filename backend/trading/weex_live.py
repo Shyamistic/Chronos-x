@@ -156,19 +156,19 @@ class WeexTradingLoop:
             poll_interval_sec=poll_interval,
         )
 
-        # Infrastructure
+        # Initialize infrastructure
         self.kelly_sizer = KellyCriterionSizer(
             account_equity=50000,
             max_risk_per_trade=0.02,
-        )  # returns dict with "position_size"[file:125]
-        self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)[file:125]
+        )
+        self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)
         self.smart_execution = SmartExecutionEngine(
             weex_client,
             max_slippage_pct=0.003,
             max_latency_ms=1500,
-        )[file:125]
-        self.monitor = RealTimePerformanceMonitor()[file:125]
-        self.mpc_governance = MPCGovernance(num_nodes=3, threshold=2)[file:125]
+        )
+        self.monitor = RealTimePerformanceMonitor()
+        self.mpc_governance = MPCGovernance(num_nodes=3, threshold=2)
 
         self.running = False
         self.current_pnl = 0.0
