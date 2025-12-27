@@ -1,11 +1,4 @@
 # backend/trading/weex_client.py
-"""
-Thin WEEX REST client for ChronosX.
-
-Supports:
-- Authenticated trading endpoints (place orders, set leverage, etc.)
-- Public market data (candles, ticker) for live price streaming.
-"""
 
 from __future__ import annotations
 
@@ -41,46 +34,32 @@ class WeexClient:
             print("[WeexClient] WARNING: missing API credentials. Trading calls will fail.")
 
     # ------------------------------------------------------------------
-    # Low-level request helpers
+    # Signing helpers (contract style)
     # ------------------------------------------------------------------
 
-    def _sign(self, timestamp: str, method: str, path: str, query: str, body: str) -> str:
+    def _sign(self, timestamp: str, method: str, path: str, body: str) -> str:
         """
-        Generate signature per WEEX contract 'Signature' doc. [web:175][web:172]
+        Contract API signing (AI Wars Quick Start style). [web:172]
 
-        message = timestamp + method.upper() + requestPath + ("?" + query if query else "") + body
+        message = timestamp + method.upper() + path + body
         sign = HMAC_SHA256(secret, message).hexdigest()
         """
-        if query:
-            request_path = f"{path}?{query}"
-        else:
-            request_path = path
-
-        message = f"{timestamp}{method.upper()}{request_path}{body}"
-        sign = hmac.new(
+        message = f"{timestamp}{method.upper()}{path}{body}"
+        return hmac.new(
             self.api_secret.encode("utf-8"),
             message.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        return sign
 
     def _headers(
         self,
         method: str,
         path: str,
-        params: Optional[Dict[str, Any]],
         body_str: str,
     ) -> Dict[str, str]:
-        # WEEX contract docs use ms timestamps (same as ticker example). [web:172]
+        # Contract examples use ms timestamps. [web:172]
         ts = str(int(time.time() * 1000))
-
-        if params:
-            items = sorted(params.items())
-            query = "&".join(f"{k}={v}" for k, v in items)
-        else:
-            query = ""
-
-        sign = self._sign(ts, method, path, query, body_str)
+        sign = self._sign(ts, method, path, body_str)
 
         return {
             "Content-Type": "application/json",
@@ -101,14 +80,16 @@ class WeexClient:
         url = self.base_url + path
         body_str = "" if json_body is None else json.dumps(json_body, separators=(",", ":"))
 
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
         if auth:
-            headers = self._headers(method, path, params, body_str)
+            headers = self._headers(method, path, body_str)
+        else:
+            headers = {"Content-Type": "application/json"}
 
         print(
             f"[WeexClient] REQUEST {method} {path} "
-            f"params={params} body={body_str} headers="
-            f"{{'ACCESS-KEY': '{self.api_key[:6]}...', 'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
+            f"params={params} body={body_str} "
+            f"headers={{'ACCESS-KEY': '{self.api_key[:6]}...', "
+            f"'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
         )
 
         resp = requests.request(
@@ -133,7 +114,7 @@ class WeexClient:
             return {"raw": resp.text}
 
     # ------------------------------------------------------------------
-    # Public market data (CONTRACT)
+    # Public market data
     # ------------------------------------------------------------------
 
     def get_candles(
@@ -142,7 +123,6 @@ class WeexClient:
         granularity: str = "1m",
         limit: int = 2,
     ) -> Dict[str, Any]:
-        """GET /capi/v2/market/candles. [web:172]"""
         return self._request(
             "GET",
             "/capi/v2/market/candles",
@@ -151,7 +131,6 @@ class WeexClient:
         )
 
     def get_ticker(self, symbol: str = "cmt_btcusdt") -> Dict[str, Any]:
-        """GET /capi/v2/market/ticker. [web:172]"""
         return self._request(
             "GET",
             "/capi/v2/market/ticker",
@@ -164,11 +143,7 @@ class WeexClient:
     # ------------------------------------------------------------------
 
     def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
-        """POST /capi/v2/account/adjustLeverage. [web:172]"""
-        payload = {
-            "symbol": symbol,
-            "leverage": leverage,
-        }
+        payload = {"symbol": symbol, "leverage": leverage}
         return self._request(
             "POST",
             "/capi/v2/account/adjustLeverage",
@@ -185,11 +160,6 @@ class WeexClient:
         match_price: str = "0",
         client_order_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        POST /capi/v2/order/placeOrder. [web:172]
-
-        type_ should match WEEX docs: e.g. "open_long", "open_short", "close_long", "close_short".
-        """
         payload: Dict[str, Any] = {
             "symbol": symbol,
             "size": size,
@@ -206,3 +176,4 @@ class WeexClient:
             json_body=payload,
             auth=True,
         )
+
