@@ -46,7 +46,7 @@ class WeexClient:
 
     def _sign(self, timestamp: str, method: str, path: str, query: str, body: str) -> str:
         """
-        Generate signature per WEEX 'Signature' doc. [web:175][web:172]
+        Generate signature per WEEX contract 'Signature' doc. [web:175][web:172]
 
         message = timestamp + method.upper() + requestPath + ("?" + query if query else "") + body
         sign = HMAC_SHA256(secret, message).hexdigest()
@@ -71,10 +71,9 @@ class WeexClient:
         params: Optional[Dict[str, Any]],
         body_str: str,
     ) -> Dict[str, str]:
-        # Use Unix epoch in SECONDS for signature to avoid 40009. [web:172]
-        ts = str(int(time.time()))
+        # WEEX contract docs use ms timestamps (same as ticker example). [web:172]
+        ts = str(int(time.time() * 1000))
 
-        # Build query string in a deterministic order
         if params:
             items = sorted(params.items())
             query = "&".join(f"{k}={v}" for k, v in items)
@@ -143,9 +142,7 @@ class WeexClient:
         granularity: str = "1m",
         limit: int = 2,
     ) -> Dict[str, Any]:
-        """
-        GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m&limit=2. [web:172]
-        """
+        """GET /capi/v2/market/candles. [web:172]"""
         return self._request(
             "GET",
             "/capi/v2/market/candles",
@@ -154,9 +151,7 @@ class WeexClient:
         )
 
     def get_ticker(self, symbol: str = "cmt_btcusdt") -> Dict[str, Any]:
-        """
-        GET /capi/v2/market/ticker?symbol=cmt_btcusdt. [web:172]
-        """
+        """GET /capi/v2/market/ticker. [web:172]"""
         return self._request(
             "GET",
             "/capi/v2/market/ticker",
@@ -169,9 +164,7 @@ class WeexClient:
     # ------------------------------------------------------------------
 
     def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
-        """
-        POST /capi/v2/account/adjustLeverage. [web:172]
-        """
+        """POST /capi/v2/account/adjustLeverage. [web:172]"""
         payload = {
             "symbol": symbol,
             "leverage": leverage,
