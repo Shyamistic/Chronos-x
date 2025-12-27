@@ -5,11 +5,11 @@ import hmac
 import base64
 import time
 import json
+import uuid
 from typing import Any, Dict, Optional
 import os
 import requests
 from dotenv import load_dotenv
-import uuid
 
 load_dotenv()
 
@@ -45,7 +45,7 @@ class WeexClient:
         body: str,
     ) -> str:
         """
-        AI Wars / WEEX demo format: base64(HMAC_SHA256(secret, ts+method+path+qs+body)). [web:190]
+        AI Wars / WEEX demo format: base64(HMAC_SHA256(secret, ts+method+path+qs+body)).
         """
         prehash = f"{timestamp}{method.upper()}{request_path}{query_string}{body}"
         digest = hmac.new(
@@ -124,10 +124,15 @@ class WeexClient:
             return {"raw": resp.text}
 
     # ------------------------------------------------------------------
-    # Public + trading methods (unchanged except place_order)
+    # Public endpoints (no auth)
     # ------------------------------------------------------------------
 
-    def get_candles(self, symbol: str = "cmt_btcusdt", granularity: str = "1m", limit: int = 2):
+    def get_candles(
+        self,
+        symbol: str = "cmt_btcusdt",
+        granularity: str = "1m",
+        limit: int = 2,
+    ) -> Dict[str, Any]:
         return self._request(
             "GET",
             "/capi/v2/market/candles",
@@ -135,7 +140,7 @@ class WeexClient:
             auth=False,
         )
 
-    def get_ticker(self, symbol: str = "cmt_btcusdt"):
+    def get_ticker(self, symbol: str = "cmt_btcusdt") -> Dict[str, Any]:
         return self._request(
             "GET",
             "/capi/v2/market/ticker",
@@ -143,7 +148,11 @@ class WeexClient:
             auth=False,
         )
 
-    def set_leverage(self, symbol: str, leverage: int):
+    # ------------------------------------------------------------------
+    # Trading endpoints (auth required)
+    # ------------------------------------------------------------------
+
+    def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
         payload = {"symbol": symbol, "leverage": leverage}
         return self._request(
             "POST",
@@ -152,34 +161,39 @@ class WeexClient:
             auth=True,
         )
 
-def place_order(
-    self,
-    symbol: str,
-    size: str,
-    type_: str,
-    price: str,
-    match_price: str = "0",
-    client_order_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    # Generate unique client_oid if not provided (WEEX requires it)
-    if not client_order_id:
-        client_order_id = str(uuid.uuid4())
-    
-    payload: Dict[str, Any] = {
-        "symbol": symbol,
-        "size": size,
-        "type": type_,
-        "order_type": "0",
-        "match_price": match_price,
-        "price": price,
-        "client_oid": client_order_id,  # Always include
-    }
+    def place_order(
+        self,
+        symbol: str,
+        size: str,
+        type_: str,
+        price: str,
+        match_price: str = "0",
+        client_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Place order on WEEX contract API.
+        
+        type_ should be:
+          "1" = open_long
+          "2" = open_short
+        """
+        # Generate unique client_oid if not provided (WEEX requires it)
+        if not client_order_id:
+            client_order_id = str(uuid.uuid4())
 
-    return self._request(
-        "POST",
-        "/capi/v2/order/placeOrder",
-        json_body=payload,
-        auth=True,
-    )
+        payload: Dict[str, Any] = {
+            "symbol": symbol,
+            "size": size,
+            "type": type_,
+            "order_type": "0",  # 0 = normal limit order
+            "match_price": match_price,
+            "price": price,
+            "client_oid": client_order_id,  # Always include
+        }
 
-
+        return self._request(
+            "POST",
+            "/capi/v2/order/placeOrder",
+            json_body=payload,
+            auth=True,
+        )
