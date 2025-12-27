@@ -464,7 +464,21 @@ async def global_exception_handler(request, exc):
 
 @app.on_event("startup")
 async def startup_event():
-    """Print startup banner."""
+    """
+    Initialize WEEX client, PaperTrader, and WeexTradingLoop on app startup.
+    """
+    global tradingloop
+
+    weex_client = WeexClient()
+    paper_trader = PaperTrader(symbol="cmt_btcusdt")
+
+    tradingloop = WeexTradingLoop(
+        weex_client=weex_client,
+        paper_trader=paper_trader,
+        symbol="cmt_btcusdt",
+        poll_interval=5.0,
+    )
+
     print("""
 ================================================================================
 ChronosX Trading API - STARTUP
@@ -475,6 +489,7 @@ Status: ✅ Ready for trading
 ================================================================================
     """)
     TradingConfig.print_config()
+    print("Startup: tradingloop initialized")
 
 
 @app.on_event("shutdown")
