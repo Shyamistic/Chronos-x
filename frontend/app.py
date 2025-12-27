@@ -12,7 +12,7 @@ import plotly.express as px
 from datetime import datetime
 
 # Config
-API_BASE = "http://localhost:8000"
+API_BASE = "http://100.30.247.108:8000"
 
 st.set_page_config(
     page_title="ChronosX | AI Trading Governance",
