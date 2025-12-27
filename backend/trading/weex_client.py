@@ -14,10 +14,10 @@ import hmac
 import time
 from typing import Any, Dict, Optional
 
+import os
+import json
 import requests
 from dotenv import load_dotenv
-import os
-
 
 load_dotenv()
 
@@ -73,11 +73,11 @@ class WeexClient:
         method: str,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        json: Optional[Dict[str, Any]] = None,
+        json_body: Optional[Dict[str, Any]] = None,
         auth: bool = False,
     ) -> Dict[str, Any]:
         url = self.base_url + path
-        body_str = "" if json is None else __import__("json").dumps(json, separators=(",", ":"))
+        body_str = "" if json_body is None else json.dumps(json_body, separators=(",", ":"))
 
         headers: Dict[str, str] = {"Content-Type": "application/json"}
         if auth:
@@ -87,11 +87,19 @@ class WeexClient:
             method=method.upper(),
             url=url,
             params=params,
-            data=body_str if json is not None else None,
+            data=body_str if json_body is not None else None,
             headers=headers,
             timeout=self.timeout,
         )
+
+        # Log non-2xx for debugging WEEX errors
+        if not resp.ok:
+            print(
+                f"[WeexClient] HTTP {resp.status_code} {method} {path} "
+                f"params={params} body={body_str} resp={resp.text}"
+            )
         resp.raise_for_status()
+
         try:
             return resp.json()
         except Exception:
@@ -110,8 +118,7 @@ class WeexClient:
         """
         Get recent candlesticks for a contract symbol.
 
-        WEEX contract API: Get Candlestick Data [web:88]
-          GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m
+        WEEX contract API: GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m
         """
         return self._request(
             "GET",
@@ -124,8 +131,7 @@ class WeexClient:
         """
         Get latest contract ticker for a symbol.
 
-        From AI Wars Participant Guide: Price Ticker API [web:6].
-          GET /capi/v2/market/ticker?symbol=cmt_btcusdt
+        WEEX contract API: GET /capi/v2/market/ticker?symbol=cmt_btcusdt
         """
         return self._request(
             "GET",
@@ -135,19 +141,21 @@ class WeexClient:
         )
 
     # ------------------------------------------------------------------
-    # Trading endpoints (examples; adjust paths as per docs)
+    # Trading endpoints
     # ------------------------------------------------------------------
 
     def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
         """
         Set leverage for a contract.
-
-        Contract leverage API, path per WEEX docs. [web:6][web:95]
         """
+        payload = {
+            "symbol": symbol,
+            "leverage": leverage,
+        }
         return self._request(
             "POST",
             "/capi/v2/account/adjustLeverage",
-            json={"symbol": symbol, "leverage": leverage},
+            json_body=payload,
             auth=True,
         )
 
@@ -163,14 +171,15 @@ class WeexClient:
         """
         Place a contract order.
 
-        Contract Place Order API: POST /capi/v2/order/placeOrder [web:94].
-        type_ examples (logical mapping):
-          "open_long", "open_short", "close_long", "close_short".
+        Contract Place Order API: POST /capi/v2/order/placeOrder.
+
+        NOTE: 'type' must match WEEX docs exactly. For the AI Wars
+        guide, strings like 'open_long' / 'open_short' are used.
         """
         payload: Dict[str, Any] = {
             "symbol": symbol,
             "size": size,
-            "type": type_,          # WEEX expects strings like "open_long"
+            "type": type_,          # e.g. "open_long", "open_short"
             "price": price,
             "match_price": match_price,
         }
@@ -180,6 +189,6 @@ class WeexClient:
         return self._request(
             "POST",
             "/capi/v2/order/placeOrder",
-            json=payload,
+            json_body=payload,
             auth=True,
         )
