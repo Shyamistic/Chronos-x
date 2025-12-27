@@ -274,11 +274,12 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         try:
             # 1. Size position
             size_result = self.kelly_sizer.calculate_position_size(
-                confidence=confidence,
-                equity=50000,
-                symbol=self.symbol,
+                signal_confidence=confidence,
+                stop_loss_pct=0.02,
+                profit_target_pct=0.05,
+                current_price=price,
             )
-            size = size_result.get("position_size", 0)
+            size = size_result["position_size"]
 
             if size <= 0 or size > TradingConfig.MAX_POSITION_SIZE:
                 print(
