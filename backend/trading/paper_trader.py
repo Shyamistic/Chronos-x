@@ -192,7 +192,12 @@ class PaperTrader:
         if not signals:
             print("[PaperTrader] No signals this candle")
             return
+        # NEW: inspect which agents fired
+        for s in signals:
+            print(f"[PaperTrader] Signal from {s.agent_id}: dir={s.direction}, conf={s.confidence:.3f}")
 
+        print(f"[PaperTrader] {len(signals)} raw signals")
+        
         print(f"[PaperTrader] {len(signals)} raw signals")
 
         # Get dynamic weights from bandit

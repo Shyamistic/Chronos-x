@@ -46,6 +46,7 @@ app.add_middleware(
 
 governance_engine = GovernanceEngine()
 paper_trader = PaperTrader()
+paper_trader.sentiment_agent.update_sentiment(0.4)
 backtester = Backtester()
 weex_client = WeexClient()
 
