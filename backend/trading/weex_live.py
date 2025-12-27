@@ -258,25 +258,35 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         price: float,
         timestamp: datetime,
     ) -> Dict[str, Any]:
-        """
-        Execute trade with full governance + execution chain.
-        """
+        """Execute trade with sizing, governance, and execution."""
         try:
-            # 1. Size position
-            size_result = self.kelly_sizer.calculate_position_size(
+            print(
+                f"[WeexTradingLoop] _execute_trade: dir={direction}, conf={confidence}, price={price}"
+            )
+
+            # 1. SIZE VIA KELLY
+            size_dict = self.kelly_sizer.calculate_position_size(
                 signal_confidence=confidence,
                 stop_loss_pct=0.02,
                 profit_target_pct=0.05,
                 current_price=price,
             )
-            size = size_result["position_size"]
 
-            if size <= 0 or size > TradingConfig.MAX_POSITION_SIZE:
-                print(f"[WeexTradingLoop] Size out of bounds: {size} BTC")
-                return {"error": "size_out_of_bounds"}
+            size = size_dict.get("position_size", 0.0)
+            print(f"[WeexTradingLoop] Kelly sized: {size} BTC, full_result={size_dict}")
+
+            # Bounds check
+            if size <= 0:
+                print(f"[WeexTradingLoop] Kelly returned zero size")
+                return {"error": "kelly_zero_size"}
+
+            if size > 0.01:
+                print(f"[WeexTradingLoop] Size {size} exceeds max 0.01 BTC")
+                return {"error": "size_exceeds_max"}
 
             side = "buy" if direction == 1 else "sell"
 
+            # 2. BUILD TRADE
             trade = {
                 "symbol": self.symbol,
                 "side": side,
@@ -286,47 +296,44 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 "timestamp": int(time.time() * 1000),
             }
 
-            # 2. Governance
-            if not TradingConfig.FORCE_EXECUTE_MODE:
-                governance_result = self.mpc_governance.submit_trade(trade)
-                if not governance_result.get("approved", False):
-                    print(
-                        f"[WeexTradingLoop] MPC REJECTED: {governance_result.get('reason', 'unknown')}"
-                    )
-                    return {"error": "governance_rejected"}
-                print(
-                    f"[WeexTradingLoop] MPC APPROVED by nodes: {governance_result.get('approvers', [])}"
-                )
-            else:
-                print(
-                    "[WeexTradingLoop] ALPHA MODE: Executing without MPC approval (force_execute=true)"
-                )
+            # 3. CIRCUIT BREAKER
+            if not self.circuit_breaker.is_trading_allowed():
+                print(f"[WeexTradingLoop] Circuit breaker halted trading")
+                return {"error": "circuit_breaker"}
 
-            # 3. Execute with quality gates
-            execution_result = await self._execute_with_quality_gates(
+            # 4. GOVERNANCE (optional)
+            if not TradingConfig.FORCE_EXECUTE_MODE:
+                gov_result = self.mpc_governance.submit_trade(trade)
+                if not gov_result.get("approved", False):
+                    print(f"[WeexTradingLoop] MPC rejected")
+                    return {"error": "mpc_rejected"}
+            else:
+                print("[WeexTradingLoop] ALPHA: Force execute (no MPC)")
+
+            # 5. EXECUTE
+            exec_result = await self._execute_with_quality_gates(
                 symbol=self.symbol,
                 side=side,
                 size=size,
                 price=price,
             )
 
-            if execution_result.get("status") != "executed":
-                print(f"[WeexTradingLoop] Order rejected: {execution_result}")
-                return execution_result
+            if exec_result.get("status") != "executed":
+                print(f"[WeexTradingLoop] Execution failed: {exec_result}")
+                return exec_result
 
-            print(f"[WeexTradingLoop] Order placed: {execution_result}")
-            self.trades.append(execution_result)
+            # 6. RECORD
+            print(f"[WeexTradingLoop] ✅ Order placed: {exec_result}")
+            self.trades.append(exec_result)
             self.trade_count += 1
 
-            self.open_positions.append(
-                {
-                    "side": 1 if side == "buy" else -1,
-                    "size": size,
-                    "entry_price": price,
-                    "order_id": execution_result.get("order_id"),
-                    "timestamp": timestamp,
-                }
-            )
+            self.open_positions.append({
+                "side": 1 if side == "buy" else -1,
+                "size": size,
+                "entry_price": price,
+                "order_id": exec_result.get("order_id"),
+                "timestamp": timestamp,
+            })
 
             self.circuit_breaker.update_state(
                 trade_pnl=0,
@@ -334,11 +341,13 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 leverage_ratio=1.5,
             )
 
-            return execution_result
+            return exec_result
 
         except Exception as e:
-            print(f"[WeexTradingLoop] Trade execution error: {e}")
-            return {"error": "execution_error", "details": str(e)}
+            print(f"[WeexTradingLoop] ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"error": "exception", "details": str(e)}
 
     async def _execute_with_quality_gates(
         self,
