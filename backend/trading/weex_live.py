@@ -66,7 +66,6 @@ class WeexLiveStreamer:
     async def _fetch_latest_candle(self) -> Optional[Dict[str, Any]]:
         """Fetch latest candlestick from WEEX REST API."""
         try:
-            # Run blocking WEEX call in executor
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(
                 None,
@@ -76,11 +75,10 @@ class WeexLiveStreamer:
                 2,
             )
 
-            # Normalize WEEX response (can be list, dict, or nested structure)
+            # Normalize WEEX response
             if isinstance(resp, list):
                 data = resp
             elif isinstance(resp, dict):
-                # Common WEEX pattern: {"code":0,"data":{"lists":[...]} }
                 if "data" in resp and isinstance(resp["data"], dict):
                     if "lists" in resp["data"]:
                         data = resp["data"]["lists"]
@@ -100,7 +98,6 @@ class WeexLiveStreamer:
 
             last = data[-1]
 
-            # Case 1: dict candle
             if isinstance(last, dict):
                 ts = int(last.get("ts") or last.get("timestamp") or 0)
                 open_ = float(last.get("open", 0))
@@ -108,8 +105,6 @@ class WeexLiveStreamer:
                 low = float(last.get("low", 0))
                 close = float(last.get("close", 0))
                 vol = float(last.get("volume") or last.get("vol") or 0)
-
-            # Case 2: flat list [ts, open, high, low, close, vol]
             elif isinstance(last, list) and last and not isinstance(last[0], list):
                 ts = int(last[0]) if len(last) > 0 else 0
                 open_ = float(last[1]) if len(last) > 1 else 0
@@ -117,8 +112,6 @@ class WeexLiveStreamer:
                 low = float(last[3]) if len(last) > 3 else 0
                 close = float(last[4]) if len(last) > 4 else 0
                 vol = float(last[5]) if len(last) > 5 else 0.0
-
-            # Case 3: nested list [[ts, open, ...], ...]
             elif isinstance(last, list) and last and isinstance(last[0], list):
                 inner = last[-1]
                 ts = int(inner[0]) if len(inner) > 0 else 0
@@ -127,7 +120,6 @@ class WeexLiveStreamer:
                 low = float(inner[3]) if len(inner) > 3 else 0
                 close = float(inner[4]) if len(inner) > 4 else 0
                 vol = float(inner[5]) if len(inner) > 5 else 0.0
-
             else:
                 return None
 
@@ -164,7 +156,7 @@ class WeexTradingLoop:
             poll_interval_sec=poll_interval,
         )
 
-        # Initialize infrastructure
+        # Infrastructure
         self.kelly_sizer = KellyCriterionSizer(
             account_equity=50000,
             max_risk_per_trade=0.02,
@@ -178,18 +170,15 @@ class WeexTradingLoop:
         self.monitor = RealTimePerformanceMonitor()[file:125]
         self.mpc_governance = MPCGovernance(num_nodes=3, threshold=2)[file:125]
 
-        # State tracking
         self.running = False
         self.current_pnl = 0.0
         self.open_positions: List[Dict[str, Any]] = []
         self.trades: List[Dict[str, Any]] = []
         self.trade_count = 0
 
-        # Print startup config
         self._print_startup_banner()
 
     def _print_startup_banner(self):
-        """Print trading mode and configuration at startup."""
         mode = (
             "ALPHA (force_execute=true, NO governance)"
             if TradingConfig.FORCE_EXECUTE_MODE
@@ -230,28 +219,23 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                     f"[WeexTradingLoop] Candle: {candle.timestamp} close={candle.close}"
                 )
 
-                # Feed into paper trader
                 await self.paper_trader.process_candle(candle)
 
-                # Get ensemble signal
                 signal = self.paper_trader.get_ensemble_signal()
 
                 if signal and signal.get("dir") != 0:
-                    # Circuit breaker
                     if not self.circuit_breaker.is_trading_allowed():
                         print(
                             f"[WeexTradingLoop] Trading halted: {self.circuit_breaker.break_reason}"
                         )
                         continue
 
-                    # Confidence threshold
                     if signal.get("conf", 0) < TradingConfig.MIN_CONFIDENCE:
                         print(
                             f"[WeexTradingLoop] Signal rejected: confidence {signal['conf']} < {TradingConfig.MIN_CONFIDENCE}"
                         )
                         continue
 
-                    # Execute trade
                     await self._execute_trade(
                         direction=signal["dir"],
                         confidence=signal["conf"],
@@ -275,23 +259,16 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         timestamp: datetime,
     ) -> Dict[str, Any]:
         """
-        Execute trade with full governance chain.
-
-        Flow:
-        1. Size position via Kelly Criterion
-        2. Check circuit breaker
-        3. Submit for MPC governance (if FORCE_EXECUTE_MODE=False)
-        4. Execute with SmartExecution quality gates
-        5. Record trade
+        Execute trade with full governance + execution chain.
         """
         try:
-            # 1. Size position (dict-returning Kelly)
+            # 1. Size position
             size_result = self.kelly_sizer.calculate_position_size(
                 signal_confidence=confidence,
                 stop_loss_pct=0.02,
                 profit_target_pct=0.05,
                 current_price=price,
-            )  # returns {"position_size": ..., ...}[file:125]
+            )
             size = size_result["position_size"]
 
             if size <= 0 or size > TradingConfig.MAX_POSITION_SIZE:
@@ -300,7 +277,6 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
 
             side = "buy" if direction == 1 else "sell"
 
-            # 2. Build trade record
             trade = {
                 "symbol": self.symbol,
                 "side": side,
@@ -310,7 +286,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 "timestamp": int(time.time() * 1000),
             }
 
-            # 3. MPC Governance
+            # 2. Governance
             if not TradingConfig.FORCE_EXECUTE_MODE:
                 governance_result = self.mpc_governance.submit_trade(trade)
                 if not governance_result.get("approved", False):
@@ -326,7 +302,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                     "[WeexTradingLoop] ALPHA MODE: Executing without MPC approval (force_execute=true)"
                 )
 
-            # 4. Execute with quality gates
+            # 3. Execute with quality gates
             execution_result = await self._execute_with_quality_gates(
                 symbol=self.symbol,
                 side=side,
@@ -338,12 +314,10 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 print(f"[WeexTradingLoop] Order rejected: {execution_result}")
                 return execution_result
 
-            # 5. Record successful trade
             print(f"[WeexTradingLoop] Order placed: {execution_result}")
             self.trades.append(execution_result)
             self.trade_count += 1
 
-            # Track open positions for circuit breaker
             self.open_positions.append(
                 {
                     "side": 1 if side == "buy" else -1,
@@ -354,7 +328,6 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 }
             )
 
-            # Update circuit breaker state (PNL updated on close)
             self.circuit_breaker.update_state(
                 trade_pnl=0,
                 open_positions=len(self.open_positions),
@@ -374,14 +347,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         size: float,
         price: float,
     ) -> Dict[str, Any]:
-        """
-        Execute order with SmartExecution quality gates.
-
-        Gates:
-        - Slippage: max 0.3%
-        - Latency: max 1500ms
-        - Volume: 24h volume > required
-        """
+        """Execute order with SmartExecution quality gates."""
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
@@ -390,7 +356,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
             size,
             side,
             price,
-        )  # order of args matches SmartExecutionEngine in paste[file:125]
+        )
         return result
 
     async def stop(self):
