@@ -9,14 +9,14 @@ Implements 4 uncorrelated signal generators:
 4. Sentiment (LLM-based, placeholder hooks)
 
 Plus an ensemble combiner that produces a final signal with
-regime-aware, confidence-weighted voting.
+regime-aware, confidence-weighted voting and rich logging.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
@@ -82,7 +82,7 @@ class MomentumRSIAgent:
 
     def update(self, candle: Candle):
         self.history.append(candle)
-        max_len = max(self.period_rsi, self.period_sma) + 50
+        max_len = max(self.period_rsi, self.period_sma) + 100
         if len(self.history) > max_len:
             self.history = self.history[-max_len:]
 
@@ -92,8 +92,8 @@ class MomentumRSIAgent:
         deltas = np.diff(closes)
         gains = np.where(deltas > 0, deltas, 0.0)
         losses = np.where(deltas < 0, -deltas, 0.0)
-        avg_gain = gains[-self.period_rsi :].mean()
-        avg_loss = losses[-self.period_rsi :].mean() + 1e-8
+        avg_gain = gains[-self.period_rsi:].mean()
+        avg_loss = losses[-self.period_rsi:].mean() + 1e-8
         rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
         return float(rsi)
@@ -101,7 +101,7 @@ class MomentumRSIAgent:
     def _compute_sma(self, closes: np.ndarray) -> float:
         if len(closes) < self.period_sma:
             return float(closes.mean())
-        return float(closes[-self.period_sma :].mean())
+        return float(closes[-self.period_sma:].mean())
 
     def generate(self) -> Optional[AgentSignal]:
         if len(self.history) < max(self.period_rsi, self.period_sma) + 1:
@@ -114,17 +114,21 @@ class MomentumRSIAgent:
 
         direction = 0
 
-        # Slightly loosened thresholds to actually generate trades in live
-        if rsi < 45 and last_close > sma:
+        # Aggressive but still sane thresholds for BTC 1m
+        if rsi < 48 and last_close > sma:
             direction = +1
-        elif rsi > 55 and last_close < sma:
+        elif rsi > 52 and last_close < sma:
             direction = -1
 
         price_distance = abs(last_close - sma) / (sma + 1e-8)
         rsi_strength = abs(rsi - 50) / 50.0  # 0-1
-        confidence = float(min(1.0, (price_distance + rsi_strength) / 2.0))
+        confidence = float(min(1.0, 0.6 * rsi_strength + 0.4 * price_distance))
 
         if direction == 0:
+            print(
+                f"[MomentumRSI] NEUTRAL rsi={rsi:.1f}, sma={sma:.1f}, "
+                f"close={last_close:.1f}, dist={price_distance:.4f}"
+            )
             return AgentSignal(
                 agent_id=self.agent_id,
                 direction=0,
@@ -137,6 +141,10 @@ class MomentumRSIAgent:
                 },
             )
 
+        print(
+            f"[MomentumRSI] SIGNAL dir={direction}, conf={confidence:.3f}, "
+            f"rsi={rsi:.1f}, sma={sma:.1f}, close={last_close:.1f}"
+        )
         return AgentSignal(
             agent_id=self.agent_id,
             direction=direction,
@@ -180,9 +188,11 @@ class MLClassifierAgent:
 
     def train(self, df: pd.DataFrame):
         if XGBClassifier is None:
+            print("[MLClassifier] XGBoost not installed, skipping training")
             return
         df = self._engineer_features(df)
-        if len(df) < 200:
+        if len(df) < 300:
+            print(f"[MLClassifier] Not enough rows to train: {len(df)} < 300")
             return
 
         df["future_return"] = df["close"].pct_change().shift(-1)
@@ -202,7 +212,8 @@ class MLClassifierAgent:
         X = df[features].values
         y = df["label"].values
 
-        if len(X) < 200:
+        if len(X) < 300:
+            print(f"[MLClassifier] Not enough labeled rows: {len(X)} < 300")
             return
 
         split_idx = int(len(X) * 0.7)
@@ -210,7 +221,7 @@ class MLClassifierAgent:
         y_train, y_test = y[:split_idx], y[split_idx:]
 
         model = XGBClassifier(
-            n_estimators=300,
+            n_estimators=400,
             max_depth=4,
             learning_rate=0.05,
             subsample=0.8,
@@ -225,6 +236,10 @@ class MLClassifierAgent:
         self.model = model
         self.trained = True
         self.last_features_dim = X.shape[1]
+        print(
+            f"[MLClassifier] Trained model on {len(X_train)} / {len(X)} samples "
+            f"(features={self.last_features_dim})"
+        )
 
     def predict(self, df_recent: pd.DataFrame) -> Optional[AgentSignal]:
         if not self.trained or self.model is None:
@@ -243,6 +258,9 @@ class MLClassifierAgent:
         ]
         x = df_recent[features].values[-1].reshape(1, -1)
         if self.last_features_dim is not None and x.shape[1] != self.last_features_dim:
+            print(
+                f"[MLClassifier] Feature dim mismatch: {x.shape[1]} vs {self.last_features_dim}"
+            )
             return None
 
         proba = self.model.predict_proba(x)[0]
@@ -256,6 +274,11 @@ class MLClassifierAgent:
             direction = 0
 
         confidence = float(proba[idx])
+
+        print(
+            f"[MLClassifier] dir={direction}, conf={confidence:.3f}, "
+            f"p_down={proba[0]:.3f}, p_flat={proba[1]:.3f}, p_up={proba[2]:.3f}"
+        )
 
         return AgentSignal(
             agent_id=self.agent_id,
@@ -310,6 +333,12 @@ class OrderFlowAgent:
 
         confidence = max(0.0, min(1.0, confidence))
 
+        print(
+            f"[OrderFlow] dir={direction}, conf={confidence:.3f}, "
+            f"buy_ratio={buy_ratio:.3f}, sell_ratio={sell_ratio:.3f}, "
+            f"buy_vol={self.buy_volume:.2f}, sell_vol={self.sell_volume:.2f}"
+        )
+
         return AgentSignal(
             agent_id=self.agent_id,
             direction=direction,
@@ -351,6 +380,10 @@ class SentimentAgent:
 
         confidence = max(0.0, min(1.0, confidence))
 
+        print(
+            f"[Sentiment] dir={direction}, conf={confidence:.3f}, score={score:.3f}"
+        )
+
         return AgentSignal(
             agent_id=self.agent_id,
             direction=direction,
@@ -362,6 +395,7 @@ class SentimentAgent:
 # ============================================================
 # Ensemble Agent (soft voting, regime-aware)
 # ============================================================
+
 class EnsembleAgent:
     """
     Weighted majority vote ensemble over all agents.
@@ -369,7 +403,7 @@ class EnsembleAgent:
     Uses confidence-weighted, risk-aware soft voting:
     - Rewards agreement between independent agents.
     - Penalizes strong disagreement (reduces confidence, not hard zero).
-    - Allows governance to decide final risk.
+    - Very permissive veto thresholds so trades actually fire.
     """
 
     def __init__(self, weights: Optional[Dict[str, float]] = None):
@@ -388,11 +422,19 @@ class EnsembleAgent:
 
     def combine(self, signals: List[AgentSignal]) -> EnsembleDecision:
         if not signals:
+            print("[Ensemble] No signals -> flat")
             return EnsembleDecision(
                 direction=0,
                 confidence=0.0,
                 agent_signals=[],
                 metadata={"raw_score": 0.0, "disagreement_penalty": 0.0},
+            )
+
+        # Log raw inputs
+        for s in signals:
+            print(
+                f"[Ensemble] INPUT agent={s.agent_id}, dir={s.direction}, "
+                f"conf={s.confidence:.3f}"
             )
 
         total_weight = 0.0
@@ -412,6 +454,7 @@ class EnsembleAgent:
             confidences.append(sig.confidence)
 
         if total_weight == 0:
+            print("[Ensemble] All signals neutral -> flat")
             return EnsembleDecision(
                 direction=0,
                 confidence=0.0,
@@ -422,8 +465,6 @@ class EnsembleAgent:
         avg_dir = weighted_dir / total_weight
         avg_conf = max(0.0, min(1.0, weighted_conf / total_weight))
 
-        # Disagreement penalty: if agents point in opposite directions,
-        # reduce effective confidence instead of forcing flat.
         if len(directions) > 1:
             dir_array = np.array(directions, dtype=float)
             disagreement = 1.0 - abs(dir_array.mean())
@@ -432,8 +473,14 @@ class EnsembleAgent:
 
         effective_conf = avg_conf * (1.0 - 0.5 * disagreement)
 
-        # Hard veto only if really weak
-        if abs(avg_dir) < 0.1 or effective_conf < 0.25:
+        print(
+            f"[Ensemble] raw_dir={avg_dir:.4f}, avg_conf={avg_conf:.3f}, "
+            f"disagree={disagreement:.3f}, eff_conf={effective_conf:.3f}"
+        )
+
+        # Very loose veto: only kill if essentially random
+        if abs(avg_dir) < 0.01 or effective_conf < 0.10:
+            print("[Ensemble] VETO flat: weak edge")
             return EnsembleDecision(
                 direction=0,
                 confidence=effective_conf,
@@ -446,7 +493,6 @@ class EnsembleAgent:
 
         final_dir = 1 if avg_dir > 0 else -1
 
-        # Optional regime tilt
         regime_factor = 1.0
         if self.current_regime:
             r = self.current_regime.lower()
@@ -459,57 +505,10 @@ class EnsembleAgent:
 
         final_conf = max(0.0, min(1.0, effective_conf * regime_factor))
 
-        return EnsembleDecision(
-            direction=final_dir,
-            confidence=final_conf,
-            agent_signals=signals,
-            metadata={
-                "raw_score": float(avg_dir),
-                "disagreement_penalty": float(disagreement),
-            },
+        print(
+            f"[Ensemble] FINAL dir={final_dir}, conf={final_conf:.3f}, "
+            f"regime={self.current_regime}, regime_factor={regime_factor:.2f}"
         )
-
-        avg_dir = weighted_dir / total_weight
-        avg_conf = max(0.0, min(1.0, weighted_conf / total_weight))
-
-        # Disagreement penalty: if agents point in opposite directions,
-        # reduce effective confidence instead of forcing flat.
-        if len(directions) > 1:
-            dir_array = np.array(directions, dtype=float)
-            disagreement = 1.0 - abs(dir_array.mean())
-        else:
-            disagreement = 0.0
-
-        # Penalize confidence by disagreement factor
-        effective_conf = avg_conf * (1.0 - 0.5 * disagreement)
-
-        # Hard veto only if effective confidence is very low
-        if abs(avg_dir) < 0.1 or effective_conf < 0.25:
-            return EnsembleDecision(
-                direction=0,
-                confidence=effective_conf,
-                agent_signals=signals,
-                metadata={
-                    "raw_score": float(avg_dir),
-                    "disagreement_penalty": float(disagreement),
-                },
-            )
-
-        final_dir = 1 if avg_dir > 0 else -1
-
-        # Regime-specific tilt (if PaperTrader sets regime string)
-        regime_factor = 1.0
-        if self.current_regime:
-            # Example: in "trend" regime, upweight trend-following sources.
-            if self.current_regime.lower() == "trend":
-                # Momentum/ML get small boost
-                if any(s.agent_id in ("momentum_rsi", "ml_classifier") for s in signals):
-                    regime_factor = 1.1
-            elif self.current_regime.lower() == "mean_reversion":
-                # Give a small penalty so only strong mean-rev setups pass
-                regime_factor = 0.95
-
-        final_conf = max(0.0, min(1.0, effective_conf * regime_factor))
 
         return EnsembleDecision(
             direction=final_dir,
