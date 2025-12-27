@@ -1,6 +1,13 @@
 # backend/api/main.py
 """
-ChronosX FastAPI Backend with Live Trading, Regime Analytics, and Governance Logs.
+ChronosX FastAPI Backend
+
+Exposes:
+- /health
+- /governance/*
+- /trading/*
+- /backtest/*
+- /agents/*
 """
 
 from __future__ import annotations
@@ -20,7 +27,6 @@ from backend.backtester import Backtester
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
 from backend.trading.weex_client import WeexClient
 from backend.trading.weex_live import WeexTradingLoop
-from backend.trading.csv_live import csv_candle_stream
 
 app = FastAPI(title="ChronosX API", version="0.2.0")
 
@@ -31,7 +37,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# -------------------------------------------------------------------
 # Singletons
+# -------------------------------------------------------------------
+
 governance_engine = GovernanceEngine()
 paper_trader = PaperTrader()
 backtester = Backtester()
@@ -42,7 +51,10 @@ weex_trading_loop: Optional[WeexTradingLoop] = None
 live_trading_task: Optional[asyncio.Task] = None
 
 
+# -------------------------------------------------------------------
 # Models
+# -------------------------------------------------------------------
+
 class RuleToggleRequest(BaseModel):
     rule_name: str
     enabled: bool
@@ -58,13 +70,19 @@ class LiveTradingControl(BaseModel):
     action: str  # "start" or "stop"
 
 
-# Routes
+# -------------------------------------------------------------------
+# Health
+# -------------------------------------------------------------------
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
 
+# -------------------------------------------------------------------
 # Governance
+# -------------------------------------------------------------------
+
 @app.get("/governance/rules")
 async def get_rules():
     return {
@@ -94,7 +112,10 @@ async def governance_analytics():
     }
 
 
-# Trading
+# -------------------------------------------------------------------
+# Trading / paper trader
+# -------------------------------------------------------------------
+
 @app.get("/trading/summary")
 async def trading_summary():
     metrics = paper_trader.get_summary_metrics()
@@ -121,7 +142,7 @@ async def trading_trades():
 async def get_open_position():
     if not paper_trader.open_position:
         return {"open_position": None}
-    
+
     pos = paper_trader.open_position
     return {
         "open_position": {
@@ -135,7 +156,10 @@ async def get_open_position():
     }
 
 
+# -------------------------------------------------------------------
 # Backtesting
+# -------------------------------------------------------------------
+
 @app.post("/backtest/run")
 async def backtest_run(payload: BacktestRequest):
     if not os.path.exists(payload.csv_path):
@@ -158,10 +182,17 @@ async def backtest_run(payload: BacktestRequest):
 
 @app.post("/demo/populate_trades")
 async def demo_populate_trades(csv_path: str = Body(..., embed=True)):
+    """
+    One-shot helper for demo/BUIDL.
+
+    Runs a backtest on the given CSV and loads the resulting trades
+    and PnL into the global paper_trader instance used by /trading/*.
+    """
     if not os.path.exists(csv_path):
         raise HTTPException(status_code=400, detail="CSV path does not exist")
 
     result = backtester.run(csv_path=csv_path)
+
     paper_trader.balance = result.final_balance
     paper_trader.total_pnl = result.total_pnl
     paper_trader.daily_pnl = result.total_pnl
@@ -174,7 +205,10 @@ async def demo_populate_trades(csv_path: str = Body(..., embed=True)):
     }
 
 
-# Portfolio Manager / Agents
+# -------------------------------------------------------------------
+# Portfolio manager / agents
+# -------------------------------------------------------------------
+
 @app.get("/agents/performance")
 async def agents_performance():
     return paper_trader.portfolio_manager.get_stats_snapshot()
@@ -186,14 +220,27 @@ async def agents_regime_stats():
     return paper_trader.portfolio_manager.get_regime_stats()
 
 
-# Live Trading Control
+# -------------------------------------------------------------------
+# Live Trading Control (WEEX)
+# -------------------------------------------------------------------
+
 @app.post("/trading/live")
-async def control_live_trading(payload: LiveTradingControl = Body(...)):
+async def control_live_trading(
+    payload: LiveTradingControl = Body(...),
+):
+    """
+    Control live trading loop on WEEX.
+
+    Body:
+      {"action": "start"}  -> start loop (if not running)
+      {"action": "stop"}   -> stop loop (if running)
+    """
     global weex_trading_loop, live_trading_task
 
     action = payload.action.lower()
 
     if action == "start":
+        # Initialize loop if needed
         if weex_trading_loop is None:
             weex_trading_loop = WeexTradingLoop(
                 weex_client=weex_client,
@@ -202,6 +249,7 @@ async def control_live_trading(payload: LiveTradingControl = Body(...)):
                 poll_interval=5.0,
             )
 
+        # Start only if not already running
         if live_trading_task is None or live_trading_task.done():
             live_trading_task = asyncio.create_task(weex_trading_loop.start())
             return {"status": "live trading started"}
@@ -209,31 +257,7 @@ async def control_live_trading(payload: LiveTradingControl = Body(...)):
             return {"status": "live trading already running"}
 
     elif action == "stop":
-        if weex_trading_loop is not None:
-            await weex_trading_loop.stop()
-        if live_trading_task is not None:
-            live_trading_task.cancel()
-            live_trading_task = None
-        return {"status": "live trading stopped"}
-
-    else:
-        raise HTTPException(status_code=400, detail="Invalid action")
-
-        # WEEX mode (existing)
-        if weex_trading_loop is None:
-            weex_trading_loop = WeexTradingLoop(
-                weex_client=weex_client,
-                paper_trader=paper_trader,
-                symbol="cmt_btcusdt",
-                poll_interval=5.0,
-            )
-        if live_trading_task is None or live_trading_task.done():
-            live_trading_task = asyncio.create_task(weex_trading_loop.start())
-            return {"status": "weex live started"}
-        else:
-            return {"status": "live trading already running"}
-
-    elif action == "stop":
+        # Stop if running
         if weex_trading_loop is not None:
             await weex_trading_loop.stop()
         if live_trading_task is not None:
@@ -249,18 +273,15 @@ async def control_live_trading(payload: LiveTradingControl = Body(...)):
 async def get_live_status():
     """Check if live trading is running."""
     return {
-        "running": weex_trading_loop is not None
-        and weex_trading_loop.running,
+        "running": weex_trading_loop is not None and weex_trading_loop.running,
         "current_regime": paper_trader.current_regime.value,
     }
 
-class LiveTradingMode(BaseModel):
-    action: str          # "start" or "stop"
-    mode: str = "weex"   # "weex" or "csv"
-    csv_path: str | None = None
-    delay_sec: float = 1.0
 
+# -------------------------------------------------------------------
 # Analytics / Explainability
+# -------------------------------------------------------------------
+
 @app.get("/analytics/trade-explanation/{trade_index}")
 async def trade_explanation(trade_index: int):
     """
@@ -269,9 +290,9 @@ async def trade_explanation(trade_index: int):
     df = paper_trader.get_trades_df()
     if trade_index < 0 or trade_index >= len(df):
         raise HTTPException(status_code=404, detail="Trade not found")
-    
+
     trade = df.iloc[trade_index]
-    
+
     return {
         "trade_index": trade_index,
         "timestamp": trade["timestamp"],
