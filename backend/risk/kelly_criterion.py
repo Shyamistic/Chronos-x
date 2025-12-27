@@ -19,12 +19,21 @@ class KellyCriterionSizer:
     
     def calculate_position_size(
         self,
-        signal_confidence: float,
-        stop_loss_pct: float,
-        profit_target_pct: float,
-        current_price: float,
+        confidence: float = 0.5,
+        equity: float = None,
+        symbol: str = None,
+        signal_confidence: float = None,
+        stop_loss_pct: float = 0.02,
+        profit_target_pct: float = 0.05,
+        current_price: float = 87445,
     ) -> dict:
         """Calculate optimal position size using Kelly Criterion."""
+        
+        # Handle both old and new calling patterns
+        if signal_confidence is None:
+            signal_confidence = confidence
+        if equity is None:
+            equity = self.equity
         
         b = profit_target_pct / stop_loss_pct if stop_loss_pct > 0 else 1.0
         p = signal_confidence
@@ -38,18 +47,18 @@ class KellyCriterionSizer:
         kelly_f = max(0, min(kelly_f, 1.0))
         fractional_kelly = kelly_f * self.kelly_fraction
         
-        max_loss_amt = self.equity * self.max_risk_pct
+        max_loss_amt = equity * self.max_risk_pct
         stop_loss_amt = current_price * stop_loss_pct
         risk_clamped_size = max_loss_amt / stop_loss_amt if stop_loss_amt > 0 else 0
         
         position_size = min(
-            fractional_kelly * self.equity / current_price,
+            fractional_kelly * equity / current_price,
             risk_clamped_size
         )
         
         return {
             "position_size": position_size,
-            "kelly_fraction_size": fractional_kelly * self.equity / current_price,
+            "kelly_fraction_size": fractional_kelly * equity / current_price,
             "risk_clamped_size": risk_clamped_size,
             "kelly_f_raw": kelly_f,
             "sizing_method": "kelly_1_4_vs_risk_clamp",
