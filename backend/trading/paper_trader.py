@@ -194,7 +194,8 @@ class PaperTrader:
 
         # Update agents
         self.momentum_agent.update(candle)
-        self.sentiment_agent.update(candle)
+        self.sentiment_agent.update(candle)  # <-- ADD THIS
+        self.order_flow_agent.reset_window()  # <-- AND THIS (or update with real flow data)
         self._update_equity(mark_price=candle.close)
 
         # Generate signals from all agents
