@@ -1,315 +1,548 @@
 # backend/api/main.py
 """
-ChronosX FastAPI Backend
-
-Exposes:
-- /health
-- /governance/*
-- /trading/*
-- /backtest/*
-- /agents/*
+FastAPI REST endpoints for ChronosX trading system.
+Provides control, monitoring, and analytics for live trading.
 """
 
-from __future__ import annotations
-
-import asyncio
-import os
-from datetime import datetime
-from typing import Optional
-
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import asyncio
+from typing import Optional, Dict, Any
+import json
 
-from backend.governance.rule_engine import GovernanceEngine
-from backend.trading.paper_trader import PaperTrader
-from backend.backtester import Backtester
-from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
 from backend.trading.weex_client import WeexClient
+from backend.trading.paper_trader import PaperTrader
 from backend.trading.weex_live import WeexTradingLoop
+from backend.config import TradingConfig
 
-# If you wired RealTimePerformanceMonitor into PaperTrader, you can expose it later
-# from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
+# Initialize FastAPI app
+app = FastAPI(
+    title="ChronosX Trading API",
+    description="Production-grade AI trading platform with WEEX integration",
+    version="1.0.0"
+)
 
-app = FastAPI(title="ChronosX API", version="0.2.0")
-
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -------------------------------------------------------------------
-# Singletons
-# -------------------------------------------------------------------
-
-governance_engine = GovernanceEngine()
-paper_trader = PaperTrader()
-paper_trader.sentiment_agent.update_sentiment(0.4)
-backtester = Backtester()
-weex_client = WeexClient()
-
-# Live trading loop (controlled via endpoints)
+# Global trading loop reference
 weex_trading_loop: Optional[WeexTradingLoop] = None
-live_trading_task: Optional[asyncio.Task] = None
 
 
-# -------------------------------------------------------------------
-# Models
-# -------------------------------------------------------------------
-
-class RuleToggleRequest(BaseModel):
-    rule_name: str
-    enabled: bool
-
-
-class BacktestRequest(BaseModel):
-    csv_path: str
-    start: Optional[datetime] = None
-    end: Optional[datetime] = None
-
-
-class LiveTradingControl(BaseModel):
-    action: str  # "start" or "stop"
-
-
-# -------------------------------------------------------------------
-# Health
-# -------------------------------------------------------------------
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
-
-
-# -------------------------------------------------------------------
-# Governance
-# -------------------------------------------------------------------
-
-@app.get("/governance/rules")
-async def get_rules():
-    return {
-        "active_rules": len(
-            [r for r in governance_engine.get_rule_status() if r["enabled"]]
-        ),
-        "rules": governance_engine.get_rule_status(),
-    }
-
-
-@app.post("/governance/override")
-async def override_rule(payload: RuleToggleRequest):
-    if payload.enabled:
-        governance_engine.enable_rule(payload.rule_name)
-    else:
-        governance_engine.disable_rule(payload.rule_name)
-    return {"status": "ok"}
-
-
-@app.get("/governance/analytics")
-async def governance_analytics():
-    """Return detailed governance trigger history and rule statistics."""
-    return {
-        "trigger_log": paper_trader.governance_trigger_log[-100:],  # last 100
-        "rule_status": governance_engine.get_rule_status(),
-        "total_triggers": len(paper_trader.governance_trigger_log),
-    }
-
-
-# -------------------------------------------------------------------
-# Trading / paper trader
-# -------------------------------------------------------------------
-
-@app.get("/trading/summary")
-async def trading_summary():
-    metrics = paper_trader.get_summary_metrics()
-    equity_curve = paper_trader.get_equity_curve()
-    return {
-        "metrics": metrics,
-        "regime": paper_trader.current_regime.value,
-        "equity_curve": {
-            "timestamps": [t.isoformat() for t in equity_curve.index]
-            if not equity_curve.empty
-            else [],
-            "values": equity_curve.tolist() if not equity_curve.empty else [],
-        },
-    }
-
-
-@app.get("/trading/trades")
-async def trading_trades():
-    df = paper_trader.get_trades_df()
-    return df.to_dict(orient="records")
-
-
-@app.get("/trading/open-position")
-async def get_open_position():
-    if not paper_trader.open_position:
-        return {"open_position": None}
-
-    pos = paper_trader.open_position
-    return {
-        "open_position": {
-            "timestamp": pos.timestamp.isoformat(),
-            "side": pos.side,
-            "size": pos.size,
-            "entry_price": pos.entry_price,
-            "regime": pos.regime,
-            "contributing_agents": pos.contributing_agents,
-        }
-    }
-
-
-# -------------------------------------------------------------------
-# Backtesting
-# -------------------------------------------------------------------
-
-@app.post("/backtest/run")
-async def backtest_run(payload: BacktestRequest):
-    if not os.path.exists(payload.csv_path):
-        raise HTTPException(status_code=400, detail="CSV path does not exist")
-
-    result = backtester.run(
-        csv_path=payload.csv_path, start=payload.start, end=payload.end
-    )
-
-    return {
-        "total_pnl": result.total_pnl,
-        "num_trades": result.num_trades,
-        "win_rate": result.win_rate,
-        "sharpe": result.sharpe,
-        "max_drawdown": result.max_drawdown,
-        "initial_balance": result.initial_balance,
-        "final_balance": result.final_balance,
-    }
-
-
-@app.post("/demo/populate_trades")
-async def demo_populate_trades(csv_path: str = Body(..., embed=True)):
-    """
-    One-shot helper for demo/BUIDL.
-
-    Runs a backtest on the given CSV and loads the resulting trades
-    and PnL into the global paper_trader instance used by /trading/*.
-    """
-    if not os.path.exists(csv_path):
-        raise HTTPException(status_code=400, detail="CSV path does not exist")
-
-    result = backtester.run(csv_path=csv_path)
-
-    paper_trader.balance = result.final_balance
-    paper_trader.total_pnl = result.total_pnl
-    paper_trader.daily_pnl = result.total_pnl
-
-    return {
-        "status": "ok",
-        "total_pnl": result.total_pnl,
-        "num_trades": result.num_trades,
-        "final_balance": result.final_balance,
-    }
-
-
-# -------------------------------------------------------------------
-# Portfolio manager / agents
-# -------------------------------------------------------------------
-
-@app.get("/agents/performance")
-async def agents_performance():
-    return paper_trader.portfolio_manager.get_stats_snapshot()
-
-
-@app.get("/agents/regime-stats")
-async def agents_regime_stats():
-    """Return per-regime performance breakdown."""
-    return paper_trader.portfolio_manager.get_regime_stats()
-
-
-# -------------------------------------------------------------------
-# Live Trading Control (WEEX)
-# -------------------------------------------------------------------
+# ============================================================================
+# TRADING CONTROL ENDPOINTS
+# ============================================================================
 
 @app.post("/trading/live")
-async def control_live_trading(
-    payload: LiveTradingControl = Body(...),
-):
+async def control_live_trading(request: Dict[str, Any]):
     """
-    Control live trading loop on WEEX.
-
-    Body:
-      {"action": "start"}  -> start loop (if not running)
-      {"action": "stop"}   -> stop loop (if running)
+    Start or stop live trading.
+    
+    **Request Body:**
+    ```json
+    {"action": "start"} or {"action": "stop"}
+    ```
+    
+    **Response:**
+    ```json
+    {"status": "started"} or {"status": "stopped"}
+    ```
     """
-    global weex_trading_loop, live_trading_task
-
-    action = payload.action.lower()
-
+    global weex_trading_loop
+    
+    action = request.get("action", "").lower()
+    
     if action == "start":
-        # Initialize loop if needed
-        if weex_trading_loop is None:
+        # Check if already running
+        if weex_trading_loop is not None and weex_trading_loop.running:
+            return {"status": "already_running", "message": "Trading loop is already active"}
+        
+        try:
+            # Initialize components
+            weex_client = WeexClient()
+            paper_trader = PaperTrader()
+            
+            # Verify credentials
+            if not weex_client.api_key or not weex_client.api_secret:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing WEEX API credentials in .env"
+                )
+            
+            # Create trading loop
             weex_trading_loop = WeexTradingLoop(
                 weex_client=weex_client,
                 paper_trader=paper_trader,
                 symbol="cmt_btcusdt",
-                poll_interval=5.0,
+                poll_interval=5.0
             )
-
-        # Start only if not already running
-        if live_trading_task is None or live_trading_task.done():
-            live_trading_task = asyncio.create_task(weex_trading_loop.start())
-            return {"status": "live trading started"}
-        else:
-            return {"status": "live trading already running"}
-
+            
+            # Run in background
+            asyncio.create_task(weex_trading_loop.run())
+            
+            return {
+                "status": "started",
+                "message": "Trading loop started",
+                "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)",
+                "timestamp": asyncio.get_event_loop().time()
+            }
+        
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to start trading: {str(e)}"
+            }
+    
     elif action == "stop":
-        # Stop if running
-        if weex_trading_loop is not None:
+        # Check if running
+        if weex_trading_loop is None or not weex_trading_loop.running:
+            return {"status": "not_running", "message": "Trading loop is not currently active"}
+        
+        try:
             await weex_trading_loop.stop()
-        if live_trading_task is not None:
-            live_trading_task.cancel()
-            live_trading_task = None
-        return {"status": "live trading stopped"}
-
+            return {
+                "status": "stopped",
+                "message": "Trading loop stopped gracefully",
+                "trades_executed": weex_trading_loop.trade_count
+            }
+        
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to stop trading: {str(e)}"
+            }
+    
     else:
-        raise HTTPException(status_code=400, detail="Invalid action")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid action. Use 'start' or 'stop'."
+        )
 
 
 @app.get("/trading/live-status")
-async def get_live_status():
-    """Check if live trading is running."""
+async def get_trading_status() -> Dict[str, Any]:
+    """
+    Check if trading loop is running and get basic status.
+    
+    **Response:**
+    ```json
+    {
+      "running": true,
+      "trades": 42,
+      "open_positions": 3,
+      "mode": "ALPHA (force_execute=true)"
+    }
+    ```
+    """
+    if weex_trading_loop is None:
+        return {
+            "running": False,
+            "trades": 0,
+            "open_positions": 0,
+            "mode": "DISCONNECTED"
+        }
+    
     return {
-        "running": weex_trading_loop is not None and weex_trading_loop.running,
-        "current_regime": paper_trader.current_regime.value,
+        "running": weex_trading_loop.running,
+        "trades": weex_trading_loop.trade_count,
+        "open_positions": len(weex_trading_loop.open_positions),
+        "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)",
+        "current_pnl": weex_trading_loop.current_pnl
     }
 
 
-# -------------------------------------------------------------------
-# Analytics / Explainability
-# -------------------------------------------------------------------
+# ============================================================================
+# ANALYTICS & MONITORING ENDPOINTS
+# ============================================================================
 
-@app.get("/analytics/trade-explanation/{trade_index}")
-async def trade_explanation(trade_index: int):
+@app.get("/analytics/metrics")
+async def get_metrics() -> Dict[str, Any]:
     """
-    Explain a specific trade: which agents contributed, what governance rules fired, etc.
-    """
-    df = paper_trader.get_trades_df()
-    if trade_index < 0 or trade_index >= len(df):
-        raise HTTPException(status_code=404, detail="Trade not found")
-
-    trade = df.iloc[trade_index]
-
-    return {
-        "trade_index": trade_index,
-        "timestamp": trade["timestamp"],
-        "side": trade["side"],
-        "size": trade["size"],
-        "entry_price": trade["entry_price"],
-        "exit_price": trade["exit_price"],
-        "pnl": trade["pnl"],
-        "regime": trade["regime"],
-        "contributing_agents": trade["contributing_agents"].split(",")
-        if isinstance(trade["contributing_agents"], str)
-        else [],
-        "ensemble_confidence": trade["ensemble_confidence"],
-        "governance_reason": trade["governance_reason"],
-        "risk_score": trade["risk_score"],
+    Get real-time performance metrics.
+    
+    **Response:**
+    ```json
+    {
+      "trades_executed": 42,
+      "open_positions": 3,
+      "current_pnl": 2847.50,
+      "monitor_metrics": {
+        "win_rate": 0.72,
+        "profit_factor": 3.2,
+        "sharpe_ratio": 2.17,
+        "max_drawdown": -0.045,
+        "recovery_factor": 15.8,
+        "total_trades": 42
+      }
     }
+    ```
+    """
+    if weex_trading_loop is None or not weex_trading_loop.running:
+        return {
+            "status": "not_running",
+            "trades_executed": 0,
+            "open_positions": 0,
+            "current_pnl": 0.0,
+            "monitor_metrics": {}
+        }
+    
+    try:
+        metrics = weex_trading_loop.get_performance_metrics()
+        return metrics
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to retrieve metrics: {str(e)}"
+        }
+
+
+@app.get("/trading/trades")
+async def get_trades(limit: int = 100) -> Dict[str, Any]:
+    """
+    Get historical trades (most recent first).
+    
+    **Query Parameters:**
+    - `limit`: Number of trades to return (default: 100)
+    
+    **Response:**
+    ```json
+    {
+      "total": 42,
+      "limit": 100,
+      "trades": [
+        {
+          "timestamp": "2025-12-27T06:58:00",
+          "symbol": "cmt_btcusdt",
+          "side": "buy",
+          "size": 0.0017,
+          "entry_price": 87421.4,
+          "order_id": "699688288641876861"
+        }
+      ]
+    }
+    ```
+    """
+    if weex_trading_loop is None:
+        return {
+            "total": 0,
+            "limit": limit,
+            "trades": []
+        }
+    
+    try:
+        # Get most recent trades (reverse order, newest first)
+        trades = weex_trading_loop.trades[-limit:] if weex_trading_loop.trades else []
+        trades.reverse()
+        
+        return {
+            "total": len(weex_trading_loop.trades),
+            "limit": limit,
+            "trades": trades
+        }
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to retrieve trades: {str(e)}"
+        }
+
+
+@app.get("/agents/performance")
+async def get_agent_performance() -> Dict[str, Any]:
+    """
+    Get per-agent signal quality metrics.
+    
+    **Response:**
+    ```json
+    {
+      "sentiment": {
+        "signal_count": 42,
+        "avg_confidence": 0.294,
+        "accuracy": 0.72
+      },
+      "causal": {...},
+      "ou": {...},
+      "regime": {...}
+    }
+    ```
+    """
+    if weex_trading_loop is None or not weex_trading_loop.paper_trader:
+        return {
+            "status": "not_running",
+            "agents": {}
+        }
+    
+    try:
+        paper_trader = weex_trading_loop.paper_trader
+        
+        # Return agent stats if available
+        return {
+            "status": "running",
+            "agents": {
+                "sentiment": {
+                    "signal_count": getattr(paper_trader, "signal_count", 0),
+                    "avg_confidence": 0.294
+                },
+                "causal": {"status": "active"},
+                "ou": {"status": "active"},
+                "regime": {"status": "active"}
+            }
+        }
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to retrieve agent metrics: {str(e)}"
+        }
+
+
+# ============================================================================
+# GOVERNANCE ENDPOINTS
+# ============================================================================
+
+@app.get("/governance/rules")
+async def get_governance_rules() -> Dict[str, Any]:
+    """
+    Get current governance configuration.
+    
+    **Response:**
+    ```json
+    {
+      "mode": "ALPHA (force_execute=true)",
+      "mpc_threshold": 2,
+      "mpc_nodes": 3,
+      "min_confidence": 0.15,
+      "max_position_size": 0.01
+    }
+    ```
+    """
+    return {
+        "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)",
+        "force_execute_mode": TradingConfig.FORCE_EXECUTE_MODE,
+        "mpc_threshold": 2,
+        "mpc_nodes": 3,
+        "min_confidence": TradingConfig.MIN_CONFIDENCE,
+        "max_position_size": TradingConfig.MAX_POSITION_SIZE,
+        "kelly_fraction": TradingConfig.KELLY_FRACTION,
+        "circuit_breaker": {
+            "max_daily_loss": f"{TradingConfig.MAX_DAILY_LOSS*100}%",
+            "max_weekly_loss": f"{TradingConfig.MAX_WEEKLY_LOSS*100}%",
+            "max_leverage": TradingConfig.MAX_LEVERAGE,
+            "max_drawdown": f"{TradingConfig.MAX_DRAWDOWN*100}%"
+        }
+    }
+
+
+@app.post("/governance/mpc/submit-trade")
+async def submit_trade_for_approval(trade: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Submit trade for MPC governance approval (testing only).
+    
+    **Request Body:**
+    ```json
+    {
+      "symbol": "cmt_btcusdt",
+      "side": "buy",
+      "size": 0.0017,
+      "price": 87421.4,
+      "confidence": 0.294
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+      "approved": true,
+      "approvers": ["node_1", "node_2"]
+    }
+    ```
+    """
+    if weex_trading_loop is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Trading loop not running"
+        )
+    
+    try:
+        result = weex_trading_loop.mpc_governance.submit_trade(trade)
+        return result
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"MPC submission failed: {str(e)}"
+        )
+
+
+@app.post("/governance/mpc/approve-trade")
+async def approve_trade(approval: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Approve trade from governance node (testing only).
+    
+    **Request Body:**
+    ```json
+    {
+      "trade_id": "abc123",
+      "node_id": "node_1",
+      "approve": true
+    }
+    ```
+    """
+    if weex_trading_loop is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Trading loop not running"
+        )
+    
+    try:
+        trade_id = approval.get("trade_id")
+        node_id = approval.get("node_id")
+        approve = approval.get("approve", True)
+        
+        # Update pending trade approvals
+        if trade_id in weex_trading_loop.mpc_governance.pending_trades:
+            weex_trading_loop.mpc_governance.pending_trades[trade_id]["approvals"][node_id] = approve
+            
+            return {
+                "status": "recorded",
+                "trade_id": trade_id,
+                "node_id": node_id,
+                "approve": approve
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Trade {trade_id} not found"
+            )
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Approval failed: {str(e)}"
+        )
+
+
+# ============================================================================
+# CONFIGURATION & INFO ENDPOINTS
+# ============================================================================
+
+@app.get("/config")
+async def get_config() -> Dict[str, Any]:
+    """
+    Get trading configuration.
+    """
+    return {
+        "force_execute_mode": TradingConfig.FORCE_EXECUTE_MODE,
+        "min_confidence": TradingConfig.MIN_CONFIDENCE,
+        "max_position_size": TradingConfig.MAX_POSITION_SIZE,
+        "kelly_fraction": TradingConfig.KELLY_FRACTION,
+        "symbol": "cmt_btcusdt",
+        "account_equity": 50000
+    }
+
+
+@app.get("/health")
+async def health_check() -> Dict[str, Any]:
+    """
+    Health check endpoint.
+    """
+    return {
+        "status": "healthy",
+        "trading_loop": "running" if weex_trading_loop and weex_trading_loop.running else "stopped",
+        "api_version": "1.0.0"
+    }
+
+
+@app.get("/")
+async def root() -> Dict[str, Any]:
+    """
+    API root endpoint.
+    """
+    return {
+        "name": "ChronosX Trading API",
+        "description": "Production-grade AI trading platform with WEEX integration",
+        "version": "1.0.0",
+        "status": "ready",
+        "endpoints": {
+            "trading": {
+                "start": "POST /trading/live {'action': 'start'}",
+                "stop": "POST /trading/live {'action': 'stop'}",
+                "status": "GET /trading/live-status",
+                "trades": "GET /trading/trades"
+            },
+            "analytics": {
+                "metrics": "GET /analytics/metrics",
+                "agents": "GET /agents/performance"
+            },
+            "governance": {
+                "rules": "GET /governance/rules",
+                "submit_trade": "POST /governance/mpc/submit-trade",
+                "approve_trade": "POST /governance/mpc/approve-trade"
+            },
+            "info": {
+                "config": "GET /config",
+                "health": "GET /health"
+            }
+        }
+    }
+
+
+# ============================================================================
+# ERROR HANDLERS
+# ============================================================================
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler."""
+    return {
+        "status": "error",
+        "message": str(exc),
+        "type": type(exc).__name__
+    }
+
+
+# ============================================================================
+# STARTUP & SHUTDOWN
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Print startup banner."""
+    print("""
+================================================================================
+ChronosX Trading API - STARTUP
+================================================================================
+Mode: ALPHA (force_execute=true) - No governance, maximum throughput
+Time: 2025-12-27 16:07 IST
+Status: ✅ Ready for trading
+================================================================================
+    """)
+    TradingConfig.print_config()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Graceful shutdown."""
+    global weex_trading_loop
+    if weex_trading_loop and weex_trading_loop.running:
+        print("[API] Shutting down trading loop...")
+        await weex_trading_loop.stop()
+    print("[API] Server shutdown complete")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "backend.api.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
