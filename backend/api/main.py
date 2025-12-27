@@ -4,15 +4,21 @@ FastAPI REST endpoints for ChronosX trading system.
 Provides control, monitoring, and analytics for live trading.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import asyncio
 from typing import Optional, Dict, Any
 import json
+import time
+import csv
+import io
+from datetime import datetime
 
 from backend.trading.weex_client import WeexClient
 from backend.trading.paper_trader import PaperTrader
 from backend.trading.weex_live import WeexTradingLoop
+from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
 from backend.config import TradingConfig
 
 # Initialize FastAPI app
@@ -31,8 +37,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global trading loop reference
+# Global references
 tradingloop: Optional[WeexTradingLoop] = None
+monitor: Optional[RealTimePerformanceMonitor] = None
+start_time = time.time()
+
+
+# ============================================================================
+# SYSTEM HEALTH ENDPOINTS
+# ============================================================================
+
+@app.get("/system/health")
+async def system_health():
+    """
+    Production-grade health check.
+    
+    Returns system status, uptime, trading state, database connectivity.
+    """
+    # Calculate uptime
+    uptime_seconds = int(time.time() - start_time)
+    
+    # Get trading status
+    trading_enabled = tradingloop is not None and tradingloop.running
+    
+    # Get database status
+    database_connected = True
+    try:
+        if monitor and monitor.use_database and monitor.repo:
+            # Try a simple query to verify DB connection
+            from backend.database.trade_repository import TradeRepository
+            summary = TradeRepository.get_performance_summary()
+            last_trade_at = summary.get("last_trade_at")
+            total_trades = summary.get("total_trades", 0)
+        else:
+            last_trade_at = None
+            total_trades = len(monitor.trades) if monitor else 0
+    except Exception as e:
+        database_connected = False
+        last_trade_at = None
+        total_trades = 0
+    
+    return {
+        "status": "healthy",
+        "trading_enabled": trading_enabled,
+        "last_trade_at": str(last_trade_at) if last_trade_at else None,
+        "symbols_active": ["cmt_btcusdt"],
+        "governance_mode": "alpha" if TradingConfig.FORCE_EXECUTE_MODE else "production",
+        "uptime_seconds": uptime_seconds,
+        "database_connected": database_connected,
+        "total_trades": total_trades,
+    }
 
 
 # ============================================================================
@@ -43,9 +97,8 @@ tradingloop: Optional[WeexTradingLoop] = None
 async def control_live_trading(action: Dict):
     """
     Start/stop live trading loop.
-
-    Body:
-    { "action": "start" } or { "action": "stop" }
+    
+    Body: { "action": "start" } or { "action": "stop" }
     """
     global tradingloop
     try:
@@ -53,7 +106,6 @@ async def control_live_trading(action: Dict):
 
         if act == "start":
             if tradingloop and not tradingloop.running:
-                import asyncio
                 asyncio.create_task(tradingloop.run())
                 return {"status": "started"}
             return {"status": "already_running"}
@@ -68,28 +120,15 @@ async def control_live_trading(action: Dict):
             raise ValueError(f"Invalid action: {act}")
 
     except Exception as e:
-        # IMPORTANT: no 'file' here anywhere
         return {
             "status": "error",
-            "message": f"Failed to start trading: {e}",
+            "message": f"Failed to control trading: {e}",
         }
 
 
 @app.get("/trading/live-status")
 async def get_trading_status() -> Dict[str, Any]:
-    """
-    Check if trading loop is running and get basic status.
-    
-    **Response:**
-    ```json
-    {
-      "running": true,
-      "trades": 42,
-      "open_positions": 3,
-      "mode": "ALPHA (force_execute=true)"
-    }
-    ```
-    """
+    """Check if trading loop is running and get basic status."""
     if tradingloop is None:
         return {
             "running": False,
@@ -102,7 +141,7 @@ async def get_trading_status() -> Dict[str, Any]:
         "running": tradingloop.running,
         "trades": tradingloop.trade_count,
         "open_positions": len(tradingloop.open_positions),
-        "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)",
+        "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION",
         "current_pnl": tradingloop.current_pnl
     }
 
@@ -116,113 +155,135 @@ async def get_metrics() -> Dict[str, Any]:
     """
     Get real-time performance metrics.
     
-    **Response:**
-    ```json
-    {
-      "trades_executed": 42,
-      "open_positions": 3,
-      "current_pnl": 2847.50,
-      "monitor_metrics": {
-        "win_rate": 0.72,
-        "profit_factor": 3.2,
-        "sharpe_ratio": 2.17,
-        "max_drawdown": -0.045,
-        "recovery_factor": 15.8,
-        "total_trades": 42
-      }
-    }
-    ```
+    Returns:
+        - Sharpe ratio, win rate, max drawdown
+        - Profit factor, recovery factor
+        - Equity curve (last 100 points)
+        - Recent trades (last 10)
     """
-    if tradingloop is None or not tradingloop.running:
-        return {
-            "status": "not_running",
-            "trades_executed": 0,
-            "open_positions": 0,
-            "current_pnl": 0.0,
-            "monitor_metrics": {}
-        }
+    if monitor is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Monitor not initialized. Start trading first."}
+        )
     
     try:
-        metrics = tradingloop.get_performance_metrics()
+        # Calculate metrics from monitor
+        metrics = monitor.calculate_metrics()
+        
+        # Add equity curve and recent trades
+        metrics["equity_curve"] = monitor.get_equity_curve(limit=100)
+        metrics["recent_trades"] = monitor.get_recent_trades(limit=10)
+        metrics["timestamp"] = datetime.now().isoformat()
+        
         return metrics
     
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to retrieve metrics: {str(e)}"
-        }
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Failed to calculate metrics",
+                "detail": str(e)
+            }
+        )
 
 
-@app.get("/trading/trades")
-async def get_trades(limit: int = 100) -> Dict[str, Any]:
+@app.get("/analytics/trades")
+async def get_trades(limit: int = 100):
     """
-    Get historical trades (most recent first).
+    Get trade history from database (if available) or memory.
     
-    **Query Parameters:**
-    - `limit`: Number of trades to return (default: 100)
-    
-    **Response:**
-    ```json
-    {
-      "total": 42,
-      "limit": 100,
-      "trades": [
-        {
-          "timestamp": "2025-12-27T06:58:00",
-          "symbol": "cmt_btcusdt",
-          "side": "buy",
-          "size": 0.0017,
-          "entry_price": 87421.4,
-          "order_id": "699688288641876861"
-        }
-      ]
-    }
-    ```
+    Query Parameters:
+        limit: Number of trades to return (default: 100)
     """
-    if tradingloop is None:
-        return {
-            "total": 0,
-            "limit": limit,
-            "trades": []
-        }
-    
     try:
-        # Get most recent trades (reverse order, newest first)
-        trades = tradingloop.trades[-limit:] if tradingloop.trades else []
-        trades.reverse()
+        # Try to get from database first
+        if monitor and monitor.use_database and monitor.repo:
+            from backend.database.trade_repository import TradeRepository
+            trades = TradeRepository.get_all_trades(limit=limit)
+            return {
+                "trades": trades,
+                "count": len(trades),
+                "source": "database"
+            }
         
-        return {
-            "total": len(tradingloop.trades),
-            "limit": limit,
-            "trades": trades
-        }
+        # Fall back to in-memory trades
+        elif monitor:
+            trades = monitor.trades[-limit:] if monitor.trades else []
+            return {
+                "trades": trades,
+                "count": len(trades),
+                "source": "memory"
+            }
+        
+        else:
+            return {
+                "trades": [],
+                "count": 0,
+                "source": "none"
+            }
     
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to retrieve trades: {str(e)}"
-        }
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Failed to retrieve trades",
+                "detail": str(e)
+            }
+        )
+
+
+@app.get("/analytics/export.csv")
+async def export_trades():
+    """
+    Export trades as CSV file.
+    
+    Returns:
+        CSV file with all trade history
+    """
+    try:
+        # Get trades from database or memory
+        if monitor and monitor.use_database and monitor.repo:
+            from backend.database.trade_repository import TradeRepository
+            trades = TradeRepository.get_all_trades(limit=1000)
+        elif monitor:
+            trades = monitor.trades
+        else:
+            trades = []
+        
+        # Create CSV
+        output = io.StringIO()
+        if trades:
+            fieldnames = [
+                "timestamp", "order_id", "symbol", "side", "size",
+                "entry_price", "exit_price", "pnl", "slippage",
+                "execution_latency_ms", "status"
+            ]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(trades)
+        
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=chronosx_trades_{datetime.now().strftime('%Y%m%d')}.csv"
+            }
+        )
+    
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Failed to export trades",
+                "detail": str(e)
+            }
+        )
 
 
 @app.get("/agents/performance")
 async def get_agent_performance() -> Dict[str, Any]:
-    """
-    Get per-agent signal quality metrics.
-    
-    **Response:**
-    ```json
-    {
-      "sentiment": {
-        "signal_count": 42,
-        "avg_confidence": 0.294,
-        "accuracy": 0.72
-      },
-      "causal": {...},
-      "ou": {...},
-      "regime": {...}
-    }
-    ```
-    """
+    """Get per-agent signal quality metrics."""
     if tradingloop is None or not tradingloop.paper_trader:
         return {
             "status": "not_running",
@@ -232,7 +293,6 @@ async def get_agent_performance() -> Dict[str, Any]:
     try:
         paper_trader = tradingloop.paper_trader
         
-        # Return agent stats if available
         return {
             "status": "running",
             "agents": {
@@ -259,22 +319,9 @@ async def get_agent_performance() -> Dict[str, Any]:
 
 @app.get("/governance/rules")
 async def get_governance_rules() -> Dict[str, Any]:
-    """
-    Get current governance configuration.
-    
-    **Response:**
-    ```json
-    {
-      "mode": "ALPHA (force_execute=true)",
-      "mpc_threshold": 2,
-      "mpc_nodes": 3,
-      "min_confidence": 0.15,
-      "max_position_size": 0.01
-    }
-    ```
-    """
+    """Get current governance configuration."""
     return {
-        "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)",
+        "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION",
         "force_execute_mode": TradingConfig.FORCE_EXECUTE_MODE,
         "mpc_threshold": 2,
         "mpc_nodes": 3,
@@ -290,104 +337,13 @@ async def get_governance_rules() -> Dict[str, Any]:
     }
 
 
-@app.post("/governance/mpc/submit-trade")
-async def submit_trade_for_approval(trade: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Submit trade for MPC governance approval (testing only).
-    
-    **Request Body:**
-    ```json
-    {
-      "symbol": "cmt_btcusdt",
-      "side": "buy",
-      "size": 0.0017,
-      "price": 87421.4,
-      "confidence": 0.294
-    }
-    ```
-    
-    **Response:**
-    ```json
-    {
-      "approved": true,
-      "approvers": ["node_1", "node_2"]
-    }
-    ```
-    """
-    if tradingloop is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Trading loop not running"
-        )
-    
-    try:
-        result = tradingloop.mpc_governance.submit_trade(trade)
-        return result
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"MPC submission failed: {str(e)}"
-        )
-
-
-@app.post("/governance/mpc/approve-trade")
-async def approve_trade(approval: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Approve trade from governance node (testing only).
-    
-    **Request Body:**
-    ```json
-    {
-      "trade_id": "abc123",
-      "node_id": "node_1",
-      "approve": true
-    }
-    ```
-    """
-    if tradingloop is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Trading loop not running"
-        )
-    
-    try:
-        trade_id = approval.get("trade_id")
-        node_id = approval.get("node_id")
-        approve = approval.get("approve", True)
-        
-        # Update pending trade approvals
-        if trade_id in tradingloop.mpc_governance.pending_trades:
-            tradingloop.mpc_governance.pending_trades[trade_id]["approvals"][node_id] = approve
-            
-            return {
-                "status": "recorded",
-                "trade_id": trade_id,
-                "node_id": node_id,
-                "approve": approve
-            }
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Trade {trade_id} not found"
-            )
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Approval failed: {str(e)}"
-        )
-
-
 # ============================================================================
 # CONFIGURATION & INFO ENDPOINTS
 # ============================================================================
 
 @app.get("/config")
 async def get_config() -> Dict[str, Any]:
-    """
-    Get trading configuration.
-    """
+    """Get trading configuration."""
     return {
         "force_execute_mode": TradingConfig.FORCE_EXECUTE_MODE,
         "min_confidence": TradingConfig.MIN_CONFIDENCE,
@@ -400,9 +356,7 @@ async def get_config() -> Dict[str, Any]:
 
 @app.get("/health")
 async def health_check() -> Dict[str, Any]:
-    """
-    Health check endpoint.
-    """
+    """Simple health check endpoint."""
     return {
         "status": "healthy",
         "trading_loop": "running" if tradingloop and tradingloop.running else "stopped",
@@ -412,49 +366,31 @@ async def health_check() -> Dict[str, Any]:
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
-    """
-    API root endpoint.
-    """
+    """API root endpoint with documentation."""
     return {
         "name": "ChronosX Trading API",
-        "description": "Production-grade AI trading platform with WEEX integration",
+        "description": "Production-grade AI trading platform",
         "version": "1.0.0",
         "status": "ready",
         "endpoints": {
+            "system": {
+                "health": "GET /system/health"
+            },
             "trading": {
                 "start": "POST /trading/live {'action': 'start'}",
                 "stop": "POST /trading/live {'action': 'stop'}",
-                "status": "GET /trading/live-status",
-                "trades": "GET /trading/trades"
+                "status": "GET /trading/live-status"
             },
             "analytics": {
                 "metrics": "GET /analytics/metrics",
+                "trades": "GET /analytics/trades",
+                "export": "GET /analytics/export.csv",
                 "agents": "GET /agents/performance"
             },
             "governance": {
-                "rules": "GET /governance/rules",
-                "submit_trade": "POST /governance/mpc/submit-trade",
-                "approve_trade": "POST /governance/mpc/approve-trade"
-            },
-            "info": {
-                "config": "GET /config",
-                "health": "GET /health"
+                "rules": "GET /governance/rules"
             }
         }
-    }
-
-
-# ============================================================================
-# ERROR HANDLERS
-# ============================================================================
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler."""
-    return {
-        "status": "error",
-        "message": str(exc),
-        "type": type(exc).__name__
     }
 
 
@@ -464,11 +400,13 @@ async def global_exception_handler(request, exc):
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    Initialize WEEX client, PaperTrader, and WeexTradingLoop on app startup.
-    """
-    global tradingloop
-
+    """Initialize trading components on app startup."""
+    global tradingloop, monitor, start_time
+    
+    # Initialize monitor
+    monitor = RealTimePerformanceMonitor(use_database=True)
+    
+    # Initialize WEEX client and trading loop
     weex_client = WeexClient()
     paper_trader = PaperTrader(symbol="cmt_btcusdt")
 
@@ -477,19 +415,20 @@ async def startup_event():
         paper_trader=paper_trader,
         symbol="cmt_btcusdt",
         poll_interval=5.0,
+        monitor=monitor  # ✅ Pass monitor here
     )
-
+    
     print("""
 ================================================================================
 ChronosX Trading API - STARTUP
 ================================================================================
-Mode: ALPHA (force_execute=true) - No governance, maximum throughput
-Time: 2025-12-27 16:07 IST
-Status: ✅ Ready for trading
+Mode: ALPHA (force_execute=true)
+Monitor: ✅ Initialized (database persistence enabled)
+Trading Loop: ✅ Ready
+API: ✅ Listening on :8000
 ================================================================================
     """)
     TradingConfig.print_config()
-    print("Startup: tradingloop initialized")
 
 
 @app.on_event("shutdown")

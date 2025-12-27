@@ -1,72 +1,180 @@
-# backend/monitoring/real_time_analytics.py
 """
-Real-time performance monitoring.
-Sharpe, win rate, max DD, profit factor, recovery factor.
+Real-time performance monitoring with PostgreSQL persistence.
+Calculates Sharpe, win rate, max DD, profit factor, recovery factor.
 """
 
 import numpy as np
+import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 class RealTimePerformanceMonitor:
-    """Live dashboard metrics."""
+    """
+    Live performance tracking with database persistence.
     
-    def __init__(self):
-        self.trades = []
-        self.daily_pnl = {}
+    Features:
+    - Calculates real-time metrics (Sharpe, win rate, max DD)
+    - Persists trades to PostgreSQL
+    - Maintains in-memory cache for fast queries
+    """
     
-    def add_trade(self, trade_data: dict):
-        """Record a completed trade."""
-        self.trades.append(trade_data)
-    
-    def calculate_metrics(self) -> dict:
-        """Calculate all performance metrics."""
-        if not self.trades:
-            return {}
+    def __init__(self, use_database: bool = True):
+        """
+        Initialize monitor.
         
+        Args:
+            use_database: If True, persist trades to PostgreSQL
+        """
+        self.trades = []
+        self.equity_curve = []
+        self.daily_pnl = {}
+        self.use_database = use_database
+        
+        # Only import TradeRepository if database is enabled
+        if self.use_database:
+            try:
+                from backend.database.trade_repository import TradeRepository
+                self.repo = TradeRepository()
+            except ImportError:
+                logger.warning("TradeRepository not available, running in memory-only mode")
+                self.use_database = False
+                self.repo = None
+        else:
+            self.repo = None
+    
+    def record_trade(self, trade: Dict):
+        """
+        Record trade in memory AND database.
+        
+        Args:
+            trade: Trade dict with keys: order_id, symbol, side, size, 
+                   entry_price, pnl, slippage, execution_latency_ms, etc.
+        """
+        # Add to in-memory cache
+        self.trades.append(trade)
+        
+        # Update equity curve
+        cumulative_pnl = sum(t.get("pnl", 0) for t in self.trades)
+        self.equity_curve.append(cumulative_pnl)
+        
+        # Persist to database (if enabled)
+        if self.use_database and self.repo:
+            try:
+                self.repo.save_trade(trade)
+                logger.info(f"✅ Persisted trade {trade.get('order_id')} to database")
+            except Exception as e:
+                logger.error(f"❌ Failed to persist trade to database: {e}")
+    
+    def calculate_metrics(self) -> Dict:
+        """
+        Calculate all performance metrics from recorded trades.
+        
+        Returns:
+            Dict with keys: total_pnl, num_trades, win_rate, sharpe_ratio,
+            max_drawdown, profit_factor, recovery_factor, etc.
+        """
+        if not self.trades:
+            return {
+                "total_pnl": 0.0,
+                "num_trades": 0,
+                "win_rate": 0.0,
+                "sharpe_ratio": 0.0,
+                "max_drawdown": 0.0,
+                "profit_factor": 0.0,
+                "recovery_factor": 0.0,
+                "avg_trade_size": 0.0,
+                "consecutive_wins": 0,
+                "consecutive_losses": 0,
+            }
+        
+        # Extract returns
         returns = []
         for t in self.trades:
-            if t.get("pnl") != 0:
-                ret = t["pnl"] / (t.get("entry_price", 1) * t.get("size", 1))
+            pnl = t.get("pnl", 0)
+            notional = t.get("entry_price", 1) * t.get("size", 1)
+            if notional > 0:
+                ret = pnl / notional
                 returns.append(ret)
         
         if not returns:
-            return {}
+            returns = [0.0]
         
-        returns = np.array(returns)
+        returns_array = np.array(returns)
         
-        # Sharpe Ratio
-        daily_returns = np.mean(returns)
-        daily_volatility = np.std(returns)
-        sharpe = (daily_returns / daily_volatility * np.sqrt(252)) if daily_volatility > 0 else 0
+        # --- Core Metrics ---
         
-        # Max Drawdown
-        cumulative = np.cumprod(1 + returns)
-        running_max = np.maximum.accumulate(cumulative)
-        drawdown = (cumulative - running_max) / running_max
-        max_dd = np.min(drawdown) if len(drawdown) > 0 else 0
+        # Total P&L
+        total_pnl = sum(t.get("pnl", 0) for t in self.trades)
         
         # Win Rate
         wins = sum(1 for t in self.trades if t.get("pnl", 0) > 0)
-        win_rate = wins / len(self.trades) if self.trades else 0
+        num_trades = len(self.trades)
+        win_rate = wins / num_trades if num_trades > 0 else 0.0
+        
+        # Sharpe Ratio (annualized)
+        mean_return = np.mean(returns_array)
+        std_return = np.std(returns_array)
+        sharpe = (mean_return / std_return * np.sqrt(252)) if std_return > 0 else 0.0
+        
+        # Max Drawdown
+        cumulative = np.cumprod(1 + returns_array)
+        running_max = np.maximum.accumulate(cumulative)
+        drawdown = (cumulative - running_max) / running_max
+        max_dd = float(np.min(drawdown)) if len(drawdown) > 0 else 0.0
         
         # Profit Factor
         gross_profit = sum(t.get("pnl", 0) for t in self.trades if t.get("pnl", 0) > 0)
         gross_loss = abs(sum(t.get("pnl", 0) for t in self.trades if t.get("pnl", 0) < 0))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
         
         # Recovery Factor
-        net_profit = sum(t.get("pnl", 0) for t in self.trades)
-        recovery_factor = net_profit / abs(max_dd) if max_dd < 0 else 0
+        recovery_factor = abs(total_pnl / max_dd) if max_dd < 0 else 0.0
+        
+        # Average Trade Size
+        avg_trade_size = np.mean([t.get("size", 0) for t in self.trades])
+        
+        # Consecutive wins/losses
+        consecutive_wins = self._count_consecutive(lambda t: t.get("pnl", 0) > 0)
+        consecutive_losses = self._count_consecutive(lambda t: t.get("pnl", 0) < 0)
         
         return {
-            "sharpe_ratio": sharpe,
-            "max_drawdown": max_dd,
-            "win_rate": win_rate,
-            "profit_factor": profit_factor,
-            "recovery_factor": recovery_factor,
-            "total_trades": len(self.trades),
-            "gross_profit": gross_profit,
-            "gross_loss": gross_loss,
-            "net_profit": net_profit,
+            "total_pnl": float(total_pnl),
+            "num_trades": int(num_trades),
+            "win_rate": float(win_rate),
+            "sharpe_ratio": float(sharpe),
+            "max_drawdown": float(max_dd),
+            "profit_factor": float(profit_factor),
+            "recovery_factor": float(recovery_factor),
+            "avg_trade_size": float(avg_trade_size),
+            "consecutive_wins": int(consecutive_wins),
+            "consecutive_losses": int(consecutive_losses),
+            "gross_profit": float(gross_profit),
+            "gross_loss": float(gross_loss),
         }
+    
+    def _count_consecutive(self, condition_fn) -> int:
+        """Count maximum consecutive trades matching condition."""
+        if not self.trades:
+            return 0
+        
+        max_streak = 0
+        current_streak = 0
+        
+        for trade in self.trades:
+            if condition_fn(trade):
+                current_streak += 1
+                max_streak = max(max_streak, current_streak)
+            else:
+                current_streak = 0
+        
+        return max_streak
+    
+    def get_recent_trades(self, limit: int = 10) -> List[Dict]:
+        """Get most recent trades."""
+        return self.trades[-limit:] if self.trades else []
+    
+    def get_equity_curve(self, limit: int = 100) -> List[float]:
+        """Get equity curve (cumulative P&L over time)."""
+        return self.equity_curve[-limit:] if self.equity_curve else []

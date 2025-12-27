@@ -145,10 +145,12 @@ class WeexTradingLoop:
         paper_trader: PaperTrader,
         symbol: str = "cmt_btcusdt",
         poll_interval: float = 5.0,
+        monitor=None,
     ):
         self.client = weex_client
         self.paper_trader = paper_trader
         self.symbol = symbol
+        self.monitor = monitor
         self.streamer = WeexLiveStreamer(
             weex_client=weex_client,
             symbol=symbol,
@@ -167,7 +169,9 @@ class WeexTradingLoop:
             max_slippage_pct=0.003,
             max_latency_ms=1500,
         )
-        self.monitor = RealTimePerformanceMonitor()
+        # Keep the monitor passed via constructor, don't overwrite it
+        if self.monitor is None:
+            self.monitor = RealTimePerformanceMonitor()
         self.mpc_governance = MPCGovernance(num_nodes=3, threshold=2)
 
         self.running = False
@@ -326,6 +330,22 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
             print(f"[WeexTradingLoop] ✅ Order placed: {exec_result}")
             self.trades.append(exec_result)
             self.trade_count += 1
+
+            # Record to monitor
+            if self.monitor:
+                trade_record = {
+                    "timestamp": timestamp.isoformat(),
+                    "order_id": exec_result.get("order_id", "unknown"),
+                    "symbol": self.symbol,
+                    "side": side,
+                    "size": size,
+                    "entry_price": price,
+                    "pnl": 0.0,  # Will be updated on exit
+                    "slippage": exec_result.get("slippage", 0.0),
+                    "execution_latency_ms": exec_result.get("latency_ms", 0),
+                    "status": "EXECUTED"
+                }
+                self.monitor.record_trade(trade_record)
 
             self.open_positions.append({
                 "side": 1 if side == "buy" else -1,
