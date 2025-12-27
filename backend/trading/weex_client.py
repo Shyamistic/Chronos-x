@@ -62,6 +62,8 @@ class WeexClient:
     # Low-level request helper
     # ------------------------------------------------------------------
 
+    # inside backend/trading/weex_client.py
+
     def _request(
         self,
         method: str,
@@ -70,15 +72,20 @@ class WeexClient:
         json_body: Optional[Dict[str, Any]] = None,
         auth: bool = False,
     ) -> Dict[str, Any]:
-        # Build query_string exactly as in demo
+        # Build query_string
         query_string = ""
         if params:
-            # They concatenate prebuilt "?k=v&k2=v2" in demo; keep deterministic order.
             items = sorted(params.items())
             query_string = "?" + "&".join(f"{k}={v}" for k, v in items)
 
         url = self.base_url + path
-        body_str = "" if json_body is None else json.dumps(json_body, separators=(",", ":"))
+
+        # Single source of truth for body string
+        body_str = (
+            ""
+            if json_body is None
+            else json.dumps(json_body, separators=(",", ":"), sort_keys=True)
+        )
 
         headers: Dict[str, str] = {"Content-Type": "application/json"}
 
@@ -104,7 +111,7 @@ class WeexClient:
 
         print(
             f"[WeexClient] REQUEST {method} {path} "
-            f"params={params} body={body_str} "
+            f"qs={query_string} body={body_str} "
             f"headers={{'ACCESS-KEY': '{self.api_key[:6]}...', "
             f"'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
         )
@@ -180,8 +187,9 @@ class WeexClient:
             "symbol": symbol,
             "size": size,
             "type": type_,
-            "price": price,
+            "order_type": "0",
             "match_price": match_price,
+            "price": price,
         }
         if client_order_id:
             payload["client_oid"] = client_order_id
@@ -192,5 +200,6 @@ class WeexClient:
             json_body=payload,
             auth=True,
         )
+
 
 

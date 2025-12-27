@@ -197,8 +197,8 @@ class WeexTradingLoop:
         print("[WeexTradingLoop] Stopping...")
         self.running = False
 
-    async def _execute_position(self):
-        """Execute trade with all infrastructure."""
+        async def _execute_position(self):
+          "Execute trade with all infrastructure."""
         pos = self.paper_trader.open_position
         if not pos:
             return
@@ -213,7 +213,7 @@ class WeexTradingLoop:
             )
             actual_size = size_dict["position_size"]
 
-            # Execute with quality gates
+            # Execute with quality gates on WEEX
             result = self.smart_execution.execute_with_quality_gates(
                 symbol=self.symbol,
                 size=actual_size,
@@ -238,17 +238,6 @@ class WeexTradingLoop:
         except Exception as e:
             print(f"[WeexTradingLoop] Order placement failed: {e}")
 
-
-            
-            if result.get("status") == "executed":
-                print(f"[WeexTradingLoop] Order placed: {result}")
-                self.open_positions.append(pos)
-            else:
-                print(f"[WeexTradingLoop] Order rejected: {result}")
-        
-        except Exception as e:
-            print(f"[WeexTradingLoop] Order placement failed: {e}")
-    
     async def _set_leverage_async(self, leverage: int):
         """Set leverage asynchronously."""
         loop = asyncio.get_event_loop()
