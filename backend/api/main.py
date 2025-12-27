@@ -32,7 +32,7 @@ app.add_middleware(
 )
 
 # Global trading loop reference
-weex_trading_loop: Optional[WeexTradingLoop] = None
+tradingloop: Optional[WeexTradingLoop] = None
 
 
 # ============================================================================
@@ -41,69 +41,38 @@ weex_trading_loop: Optional[WeexTradingLoop] = None
 
 @app.post("/trading/live")
 async def control_live_trading(action: Dict):
-    """Start or stop live trading."""
-    global weex_trading_loop
-    
-    action_type = action.get("action")
-    
-    if action_type == "start":
-        # Check if already running
-        if weex_trading_loop is not None and weex_trading_loop.running:
-            return {"status": "already_running", "message": "Trading loop is already active"}
-        
-        try:
-            # Initialize components
-            weex_client = WeexClient()
-            paper_trader = PaperTrader(initial_balance=10000.0, symbol="cmt_btcusdt")
-            
-            # Create trading loop
-            weex_trading_loop = WeexTradingLoop(
-                weex_client=weex_client,
-                paper_trader=paper_trader,
-                symbol="cmt_btcusdt",
-                poll_interval=5.0
-            )
-            
-            # Run in background
-            asyncio.create_task(weex_trading_loop.run())
-            
-            return {
-                "status": "started",
-                "message": "Trading loop started",
-                "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)",
-                "timestamp": asyncio.get_event_loop().time()
-            }
-        
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Failed to start trading: {str(e)}"
-            }
-    
-    elif action_type == "stop":
-        # Check if running
-        if weex_trading_loop is None or not weex_trading_loop.running:
-            return {"status": "not_running", "message": "Trading loop is not currently active"}
-        
-        try:
-            await weex_trading_loop.stop()
-            return {
-                "status": "stopped",
-                "message": "Trading loop stopped gracefully",
-                "trades_executed": weex_trading_loop.trade_count
-            }
-        
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Failed to stop trading: {str(e)}"
-            }
-    
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid action. Use 'start' or 'stop'."
-        )
+    """
+    Start/stop live trading loop.
+
+    Body:
+    { "action": "start" } or { "action": "stop" }
+    """
+    global tradingloop
+    try:
+        act = action.get("action")
+
+        if act == "start":
+            if tradingloop and not tradingloop.running:
+                import asyncio
+                asyncio.create_task(tradingloop.run())
+                return {"status": "started"}
+            return {"status": "already_running"}
+
+        elif act == "stop":
+            if tradingloop and tradingloop.running:
+                await tradingloop.stop()
+                return {"status": "stopped"}
+            return {"status": "not_running"}
+
+        else:
+            raise ValueError(f"Invalid action: {act}")
+
+    except Exception as e:
+        # IMPORTANT: no 'file' here anywhere
+        return {
+            "status": "error",
+            "message": f"Failed to start trading: {e}",
+        }
 
 
 @app.get("/trading/live-status")
@@ -121,7 +90,7 @@ async def get_trading_status() -> Dict[str, Any]:
     }
     ```
     """
-    if weex_trading_loop is None:
+    if tradingloop is None:
         return {
             "running": False,
             "trades": 0,
@@ -130,11 +99,11 @@ async def get_trading_status() -> Dict[str, Any]:
         }
     
     return {
-        "running": weex_trading_loop.running,
-        "trades": weex_trading_loop.trade_count,
-        "open_positions": len(weex_trading_loop.open_positions),
+        "running": tradingloop.running,
+        "trades": tradingloop.trade_count,
+        "open_positions": len(tradingloop.open_positions),
         "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION (governance required)",
-        "current_pnl": weex_trading_loop.current_pnl
+        "current_pnl": tradingloop.current_pnl
     }
 
 
@@ -164,7 +133,7 @@ async def get_metrics() -> Dict[str, Any]:
     }
     ```
     """
-    if weex_trading_loop is None or not weex_trading_loop.running:
+    if tradingloop is None or not tradingloop.running:
         return {
             "status": "not_running",
             "trades_executed": 0,
@@ -174,7 +143,7 @@ async def get_metrics() -> Dict[str, Any]:
         }
     
     try:
-        metrics = weex_trading_loop.get_performance_metrics()
+        metrics = tradingloop.get_performance_metrics()
         return metrics
     
     except Exception as e:
@@ -210,7 +179,7 @@ async def get_trades(limit: int = 100) -> Dict[str, Any]:
     }
     ```
     """
-    if weex_trading_loop is None:
+    if tradingloop is None:
         return {
             "total": 0,
             "limit": limit,
@@ -219,11 +188,11 @@ async def get_trades(limit: int = 100) -> Dict[str, Any]:
     
     try:
         # Get most recent trades (reverse order, newest first)
-        trades = weex_trading_loop.trades[-limit:] if weex_trading_loop.trades else []
+        trades = tradingloop.trades[-limit:] if tradingloop.trades else []
         trades.reverse()
         
         return {
-            "total": len(weex_trading_loop.trades),
+            "total": len(tradingloop.trades),
             "limit": limit,
             "trades": trades
         }
@@ -254,14 +223,14 @@ async def get_agent_performance() -> Dict[str, Any]:
     }
     ```
     """
-    if weex_trading_loop is None or not weex_trading_loop.paper_trader:
+    if tradingloop is None or not tradingloop.paper_trader:
         return {
             "status": "not_running",
             "agents": {}
         }
     
     try:
-        paper_trader = weex_trading_loop.paper_trader
+        paper_trader = tradingloop.paper_trader
         
         # Return agent stats if available
         return {
@@ -345,14 +314,14 @@ async def submit_trade_for_approval(trade: Dict[str, Any]) -> Dict[str, Any]:
     }
     ```
     """
-    if weex_trading_loop is None:
+    if tradingloop is None:
         raise HTTPException(
             status_code=400,
             detail="Trading loop not running"
         )
     
     try:
-        result = weex_trading_loop.mpc_governance.submit_trade(trade)
+        result = tradingloop.mpc_governance.submit_trade(trade)
         return result
     
     except Exception as e:
@@ -376,7 +345,7 @@ async def approve_trade(approval: Dict[str, Any]) -> Dict[str, Any]:
     }
     ```
     """
-    if weex_trading_loop is None:
+    if tradingloop is None:
         raise HTTPException(
             status_code=400,
             detail="Trading loop not running"
@@ -388,8 +357,8 @@ async def approve_trade(approval: Dict[str, Any]) -> Dict[str, Any]:
         approve = approval.get("approve", True)
         
         # Update pending trade approvals
-        if trade_id in weex_trading_loop.mpc_governance.pending_trades:
-            weex_trading_loop.mpc_governance.pending_trades[trade_id]["approvals"][node_id] = approve
+        if trade_id in tradingloop.mpc_governance.pending_trades:
+            tradingloop.mpc_governance.pending_trades[trade_id]["approvals"][node_id] = approve
             
             return {
                 "status": "recorded",
@@ -436,7 +405,7 @@ async def health_check() -> Dict[str, Any]:
     """
     return {
         "status": "healthy",
-        "trading_loop": "running" if weex_trading_loop and weex_trading_loop.running else "stopped",
+        "trading_loop": "running" if tradingloop and tradingloop.running else "stopped",
         "api_version": "1.0.0"
     }
 
@@ -511,10 +480,10 @@ Status: ✅ Ready for trading
 @app.on_event("shutdown")
 async def shutdown_event():
     """Graceful shutdown."""
-    global weex_trading_loop
-    if weex_trading_loop and weex_trading_loop.running:
+    global tradingloop
+    if tradingloop and tradingloop.running:
         print("[API] Shutting down trading loop...")
-        await weex_trading_loop.stop()
+        await tradingloop.stop()
     print("[API] Server shutdown complete")
 
 
