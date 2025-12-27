@@ -1,12 +1,11 @@
-# backend/agents/signal_agents.py
 """
-ChronosX Signal Agents
+ChronosX Signal Agents - Production Ready
 
 Implements 4 uncorrelated signal generators:
 1. Momentum + RSI (mean reversion / momentum hybrid)
 2. ML Classifier (XGBoost)
 3. Order flow / microstructure
-4. Sentiment (LLM-based, placeholder hooks)
+4. Sentiment (price momentum)
 
 Plus an ensemble combiner that produces a final signal with
 regime-aware, confidence-weighted voting and rich logging.
@@ -52,19 +51,29 @@ class Candle:
 
 
 @dataclass
-class AgentSignal:
+class TradingSignal:
+    """Standard signal from a single agent."""
     agent_id: str
     direction: int  # +1 long, -1 short, 0 neutral
     confidence: float  # 0-1
-    metadata: Dict
+    metadata: Dict = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
 
 @dataclass
-class EnsembleDecision:
+class TradingDecision:
+    """Final ensemble decision."""
     direction: int
     confidence: float
-    agent_signals: List[AgentSignal]
-    metadata: Dict
+    agent_signals: List[TradingSignal]
+    metadata: Dict = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
 
 # ============================================================
@@ -72,7 +81,15 @@ class EnsembleDecision:
 # ============================================================
 
 class MomentumRSIAgent:
-    """RSI + SMA mean-reversion / momentum hybrid."""
+    """
+    RSI + SMA mean-reversion / momentum hybrid.
+    
+    Fires when:
+    - RSI < 48 AND price > SMA (oversold but recovering)
+    - RSI > 52 AND price < SMA (overbought but falling)
+    
+    Confidence scales with RSI strength + price distance from SMA.
+    """
 
     def __init__(self, period_rsi: int = 14, period_sma: int = 20):
         self.agent_id = "momentum_rsi"
@@ -81,12 +98,14 @@ class MomentumRSIAgent:
         self.history: List[Candle] = []
 
     def update(self, candle: Candle):
+        """Append new candle to history."""
         self.history.append(candle)
         max_len = max(self.period_rsi, self.period_sma) + 100
         if len(self.history) > max_len:
             self.history = self.history[-max_len:]
 
     def _compute_rsi(self, closes: np.ndarray) -> float:
+        """Wilder's RSI (14-period default)."""
         if len(closes) < self.period_rsi + 1:
             return 50.0
         deltas = np.diff(closes)
@@ -99,11 +118,16 @@ class MomentumRSIAgent:
         return float(rsi)
 
     def _compute_sma(self, closes: np.ndarray) -> float:
+        """Simple moving average."""
         if len(closes) < self.period_sma:
             return float(closes.mean())
         return float(closes[-self.period_sma:].mean())
 
-    def generate(self) -> Optional[AgentSignal]:
+    def generate(self) -> Optional[TradingSignal]:
+        """
+        Generate momentum signal.
+        Returns None if insufficient history, else TradingSignal.
+        """
         if len(self.history) < max(self.period_rsi, self.period_sma) + 1:
             return None
 
@@ -114,7 +138,7 @@ class MomentumRSIAgent:
 
         direction = 0
 
-        # Aggressive but still sane thresholds for BTC 1m
+        # Mean-reversion signals: RSI extreme + price movement
         if rsi < 48 and last_close > sma:
             direction = +1
         elif rsi > 52 and last_close < sma:
@@ -129,7 +153,7 @@ class MomentumRSIAgent:
                 f"[MomentumRSI] NEUTRAL rsi={rsi:.1f}, sma={sma:.1f}, "
                 f"close={last_close:.1f}, dist={price_distance:.4f}"
             )
-            return AgentSignal(
+            return TradingSignal(
                 agent_id=self.agent_id,
                 direction=0,
                 confidence=0.0,
@@ -145,7 +169,7 @@ class MomentumRSIAgent:
             f"[MomentumRSI] SIGNAL dir={direction}, conf={confidence:.3f}, "
             f"rsi={rsi:.1f}, sma={sma:.1f}, close={last_close:.1f}"
         )
-        return AgentSignal(
+        return TradingSignal(
             agent_id=self.agent_id,
             direction=direction,
             confidence=confidence,
@@ -163,7 +187,12 @@ class MomentumRSIAgent:
 # ============================================================
 
 class MLClassifierAgent:
-    """Supervised ML classifier predicting next candle direction."""
+    """
+    Supervised ML classifier predicting next candle direction.
+    
+    Uses features: returns (1/3/6), volatility, SMA ratio, volume Z-score.
+    Labels: +1 (up >0.15%), -1 (down >0.15%), 0 (flat).
+    """
 
     def __init__(self):
         self.agent_id = "ml_classifier"
@@ -172,6 +201,7 @@ class MLClassifierAgent:
         self.last_features_dim: Optional[int] = None
 
     def _engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Feature engineering for ML model."""
         df = df.copy()
         df["return_1"] = df["close"].pct_change()
         df["return_3"] = df["close"].pct_change(3)
@@ -187,18 +217,21 @@ class MLClassifierAgent:
         return df
 
     def train(self, df: pd.DataFrame):
+        """Train on historical OHLCV data."""
         if XGBClassifier is None:
             print("[MLClassifier] XGBoost not installed, skipping training")
             return
+        
         df = self._engineer_features(df)
         if len(df) < 300:
             print(f"[MLClassifier] Not enough rows to train: {len(df)} < 300")
             return
 
+        # Create labels
         df["future_return"] = df["close"].pct_change().shift(-1)
         df["label"] = 0
-        df.loc[df["future_return"] > 0.0015, "label"] = 1
-        df.loc[df["future_return"] < -0.0015, "label"] = -1
+        df.loc[df["future_return"] > 0.0015, "label"] = 1  # +0.15%
+        df.loc[df["future_return"] < -0.0015, "label"] = -1  # -0.15%
         df = df.dropna().reset_index(drop=True)
 
         features = [
@@ -216,10 +249,12 @@ class MLClassifierAgent:
             print(f"[MLClassifier] Not enough labeled rows: {len(X)} < 300")
             return
 
+        # Train/test split
         split_idx = int(len(X) * 0.7)
         X_train, X_test = X[:split_idx], X[split_idx:]
         y_train, y_test = y[:split_idx], y[split_idx:]
 
+        # Train model
         model = XGBClassifier(
             n_estimators=400,
             max_depth=4,
@@ -241,9 +276,11 @@ class MLClassifierAgent:
             f"(features={self.last_features_dim})"
         )
 
-    def predict(self, df_recent: pd.DataFrame) -> Optional[AgentSignal]:
+    def predict(self, df_recent: pd.DataFrame) -> Optional[TradingSignal]:
+        """Generate signal from recent candles."""
         if not self.trained or self.model is None:
             return None
+        
         df_recent = self._engineer_features(df_recent)
         if len(df_recent) == 0:
             return None
@@ -280,7 +317,7 @@ class MLClassifierAgent:
             f"p_down={proba[0]:.3f}, p_flat={proba[1]:.3f}, p_up={proba[2]:.3f}"
         )
 
-        return AgentSignal(
+        return TradingSignal(
             agent_id=self.agent_id,
             direction=direction,
             confidence=confidence,
@@ -291,13 +328,22 @@ class MLClassifierAgent:
             },
         )
 
+    def generate(self) -> Optional[TradingSignal]:
+        """Placeholder for compatibility; override with predict()."""
+        return None
+
 
 # ============================================================
 # Order Flow Agent
 # ============================================================
 
 class OrderFlowAgent:
-    """Order-flow based agent using buy/sell volume ratios."""
+    """
+    Order-flow based agent using buy/sell volume ratios.
+    
+    Fires when buy_ratio > 0.55 (bullish) or sell_ratio > 0.55 (bearish).
+    Confidence scales with imbalance magnitude.
+    """
 
     def __init__(self, window_seconds: int = 60):
         self.agent_id = "order_flow"
@@ -306,14 +352,17 @@ class OrderFlowAgent:
         self.sell_volume = 0.0
 
     def update_volume(self, buy_volume: float, sell_volume: float):
+        """Accumulate buy/sell volume."""
         self.buy_volume += buy_volume
         self.sell_volume += sell_volume
 
     def reset_window(self):
+        """Reset for next time window."""
         self.buy_volume = 0.0
         self.sell_volume = 0.0
 
-    def generate(self) -> Optional[AgentSignal]:
+    def generate(self) -> Optional[TradingSignal]:
+        """Generate order-flow signal."""
         total = self.buy_volume + self.sell_volume
         if total < 1e-6:
             return None
@@ -339,7 +388,7 @@ class OrderFlowAgent:
             f"buy_vol={self.buy_volume:.2f}, sell_vol={self.sell_volume:.2f}"
         )
 
-        return AgentSignal(
+        return TradingSignal(
             agent_id=self.agent_id,
             direction=direction,
             confidence=confidence,
@@ -353,19 +402,25 @@ class OrderFlowAgent:
 
 
 # ============================================================
-# Sentiment Agent
+# Sentiment Agent (Price Momentum)
 # ============================================================
 
 class SentimentAgent:
     """
-    Simple price momentum sentiment: compares current close to previous close.
-    Emits directional signal on small up/down moves.
-    """
+    Simple price momentum sentiment.
     
+    Compares current close to previous close.
+    Emits directional signal on candle-to-candle moves.
+    
+    Threshold: 0.01% move triggers a direction.
+    Confidence: 0.1–0.3 range, scales with move magnitude.
+    """
+
     def __init__(self):
+        self.agent_id = "sentiment"
         self.last_close = None
         self.last_score = 0.0
-    
+
     def update(self, candle: Candle):
         """Update with new candle data."""
         if self.last_close is None:
@@ -373,45 +428,44 @@ class SentimentAgent:
             self.last_close = candle.close
             self.last_score = 0.0
             return
-        
+
         # Calculate 1-minute price change %
         change_pct = (candle.close - self.last_close) / self.last_close if self.last_close != 0 else 0
         self.last_score = change_pct
         self.last_close = candle.close
-        
-        print(f"[Sentiment] Close {self.last_close}, Change: {change_pct*100:.4f}%")
-    
-    def generate(self):
+
+        print(f"[Sentiment] Close {self.last_close:.1f}, Change: {change_pct*100:.4f}%")
+
+    def generate(self) -> Optional[TradingSignal]:
         """
         Convert price momentum into directional signal.
+        
         Even tiny moves (0.01%) will trigger a direction.
         """
-        from backend.agents.signal_agents import TradingSignal  # adjust if different location
-        
         # Threshold: 0.01% move is enough to pick a direction
         threshold = 0.0001  # 0.01%
-        
+
         if abs(self.last_score) < threshold:
             # No meaningful move yet
             return TradingSignal(
-                agent_id="sentiment",
+                agent_id=self.agent_id,
                 direction=0,
                 confidence=0.05,
             )
-        
+
         # We have a directional move
         direction = 1 if self.last_score > 0 else -1
-        
+
         # Confidence scales with magnitude
         # Even tiny moves (0.01%) get 0.1 confidence, large moves cap at 0.3
         confidence = min(0.3, max(0.1, abs(self.last_score) * 100))  # 0.1–0.3 range
-        
+
         return TradingSignal(
-            agent_id="sentiment",
+            agent_id=self.agent_id,
             direction=direction,
             confidence=confidence,
+            metadata={"price_change_pct": self.last_score * 100},
         )
-
 
 
 # ============================================================
@@ -426,6 +480,11 @@ class EnsembleAgent:
     - Rewards agreement between independent agents.
     - Penalizes strong disagreement (reduces confidence, not hard zero).
     - Very permissive veto thresholds so trades actually fire.
+    
+    Production features:
+    - Regime-aware weighting (can shift weights per regime)
+    - Graceful handling of missing signals
+    - Rich metadata for debugging
     """
 
     def __init__(self, weights: Optional[Dict[str, float]] = None):
@@ -436,16 +495,29 @@ class EnsembleAgent:
             "order_flow": 1.0,
             "sentiment": 1.0,
         }
-        # Optional regime context; PaperTrader can set this each candle
         self.current_regime: Optional[str] = None
 
     def set_regime(self, regime: Optional[str]):
+        """Update regime context for dynamic weighting."""
         self.current_regime = regime
 
-    def combine(self, signals: List[AgentSignal]) -> EnsembleDecision:
+    def set_weights(self, weights: Dict[str, float]):
+        """Override weights dynamically (e.g., Thompson Sampling)."""
+        self.weights = weights
+
+    def combine(self, signals: List[TradingSignal]) -> TradingDecision:
+        """
+        Combine multiple signals into one ensemble decision.
+        
+        Args:
+            signals: List of TradingSignal from all active agents
+        
+        Returns:
+            TradingDecision with direction, confidence, agent_signals
+        """
         if not signals:
             print("[Ensemble] No signals -> flat")
-            return EnsembleDecision(
+            return TradingDecision(
                 direction=0,
                 confidence=0.0,
                 agent_signals=[],
@@ -474,8 +546,8 @@ class EnsembleAgent:
         # No directional contributors
         if total_weight == 0:
             print("[Ensemble] All signals neutral -> flat with small confidence")
-            # IMPORTANT: keep small non-zero confidence so downstream can choose
-            return EnsembleDecision(
+            # IMPORTANT: keep small non-zero confidence
+            return TradingDecision(
                 direction=0,
                 confidence=0.05,
                 agent_signals=active,
@@ -490,7 +562,7 @@ class EnsembleAgent:
             f"[Ensemble] FINAL dir={direction}, conf={confidence:.3f}, raw={raw:.4f}"
         )
 
-        return EnsembleDecision(
+        return TradingDecision(
             direction=direction,
             confidence=confidence,
             agent_signals=active,
