@@ -218,7 +218,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                 )
 
                 # Feed into paper trader
-                self.paper_trader.update_candle(candle.close, candle.timestamp)
+                await self.paper_trader.process_candle(candle)
 
                 # Get ensemble signal
                 signal = self.paper_trader.get_ensemble_signal()
