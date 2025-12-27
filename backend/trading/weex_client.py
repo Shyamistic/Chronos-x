@@ -44,22 +44,47 @@ class WeexClient:
     # Low-level request helpers
     # ------------------------------------------------------------------
 
-    def _sign(self, timestamp: str, method: str, path: str, body: str = "") -> str:
+    def _sign(self, timestamp: str, method: str, path: str, query: str, body: str) -> str:
         """
-        Create HMAC SHA256 signature.
+        Generate signature per WEEX 'Signature' doc. [web:175][web:172]
 
-        Adjust to official WEEX signing rules if needed.
+        message = timestamp + method.upper() + requestPath + ("?" + query if query else "") + body
+        sign = HMAC_SHA256(secret, message).hexdigest()
         """
-        payload = f"{timestamp}{method.upper()}{path}{body}"
-        return hmac.new(
+        # path is like "/capi/v2/order/placeOrder", query is already "k=v&k2=v2" or ""
+        if query:
+            request_path = f"{path}?{query}"
+        else:
+            request_path = path
+
+        message = f"{timestamp}{method.upper()}{request_path}{body}"
+        sign = hmac.new(
             self.api_secret.encode("utf-8"),
-            payload.encode("utf-8"),
+            message.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
+        return sign
 
-    def _headers(self, method: str, path: str, body: str = "") -> Dict[str, str]:
+    def _headers(
+        self,
+        method: str,
+        path: str,
+        params: Optional[Dict[str, Any]],
+        body_str: str,
+    ) -> Dict[str, str]:
+        # WEEX wants Unix epoch in ms, valid 30s, and same value in ACCESS-TIMESTAMP and signature. [web:172][web:168]
         ts = str(int(time.time() * 1000))
-        sign = self._sign(ts, method, path, body)
+
+        # Build query string in exactly the same way as requests will send it
+        if params:
+            # Stable ordering for deterministic signature
+            items = sorted(params.items())
+            query = "&".join(f"{k}={v}" for k, v in items)
+        else:
+            query = ""
+
+        sign = self._sign(ts, method, path, query, body_str)
+
         return {
             "Content-Type": "application/json",
             "ACCESS-KEY": self.api_key,
@@ -79,9 +104,18 @@ class WeexClient:
         url = self.base_url + path
         body_str = "" if json_body is None else json.dumps(json_body, separators=(",", ":"))
 
+        # Build headers
         headers: Dict[str, str] = {"Content-Type": "application/json"}
         if auth:
-            headers.update(self._headers(method, path, body_str))
+            headers = self._headers(method, path, params, body_str)
+
+        # Debug for AI Wars troubleshooting
+        # (safe: contains no secrets)
+        print(
+            f"[WeexClient] REQUEST {method} {path} "
+            f"params={params} body={body_str} headers={{'ACCESS-KEY': '{self.api_key[:6]}...', "
+            f"'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
+        )
 
         resp = requests.request(
             method=method.upper(),
@@ -92,8 +126,8 @@ class WeexClient:
             timeout=self.timeout,
         )
 
-        # Log non-2xx for debugging WEEX errors
         if not resp.ok:
+            # Will show error code & message like 40009 sign error. [web:164][web:166]
             print(
                 f"[WeexClient] HTTP {resp.status_code} {method} {path} "
                 f"params={params} body={body_str} resp={resp.text}"
@@ -116,9 +150,7 @@ class WeexClient:
         limit: int = 2,
     ) -> Dict[str, Any]:
         """
-        Get recent candlesticks for a contract symbol.
-
-        WEEX contract API: GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m
+        GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m&limit=2. [web:172]
         """
         return self._request(
             "GET",
@@ -129,9 +161,7 @@ class WeexClient:
 
     def get_ticker(self, symbol: str = "cmt_btcusdt") -> Dict[str, Any]:
         """
-        Get latest contract ticker for a symbol.
-
-        WEEX contract API: GET /capi/v2/market/ticker?symbol=cmt_btcusdt
+        GET /capi/v2/market/ticker?symbol=cmt_btcusdt. [web:172]
         """
         return self._request(
             "GET",
@@ -141,12 +171,12 @@ class WeexClient:
         )
 
     # ------------------------------------------------------------------
-    # Trading endpoints
+    # Trading endpoints (contract)
     # ------------------------------------------------------------------
 
     def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
         """
-        Set leverage for a contract.
+        POST /capi/v2/account/adjustLeverage. [web:172]
         """
         payload = {
             "symbol": symbol,
@@ -169,17 +199,14 @@ class WeexClient:
         client_order_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Place a contract order.
+        POST /capi/v2/order/placeOrder. [web:172]
 
-        Contract Place Order API: POST /capi/v2/order/placeOrder.
-
-        NOTE: 'type' must match WEEX docs exactly. For the AI Wars
-        guide, strings like 'open_long' / 'open_short' are used.
+        type_ should match WEEX docs: e.g. "open_long", "open_short", "close_long", "close_short".
         """
         payload: Dict[str, Any] = {
             "symbol": symbol,
             "size": size,
-            "type": type_,          # e.g. "open_long", "open_short"
+            "type": type_,
             "price": price,
             "match_price": match_price,
         }
