@@ -357,61 +357,61 @@ class OrderFlowAgent:
 # ============================================================
 
 class SentimentAgent:
-    """Sentiment-based agent using price change as proxy for sentiment."""
-
+    """
+    Simple price momentum sentiment: compares current close to previous close.
+    Emits directional signal on small up/down moves.
+    """
+    
     def __init__(self):
-        self.agent_id = "sentiment"
+        self.last_close = None
         self.last_score = 0.0
-        self._last_close = None
-
+    
     def update(self, candle: Candle):
-        """
-        Dummy sentiment: use simple price change as proxy for sentiment
-        until a real NLP sentiment feed is wired.
-        """
-        if self._last_close is None:
-            self._last_close = candle.close
+        """Update with new candle data."""
+        if self.last_close is None:
+            # First candle, no prior to compare
+            self.last_close = candle.close
             self.last_score = 0.0
             return
-
-        change = (candle.close - self._last_close) / self._last_close
-        self._last_close = candle.close
-
-        # Treat small up/down moves as sentiment
-        # +ve price change -> bullish sentiment, -ve -> bearish
-        self.last_score = change
-
-    def update_sentiment(self, score: float):
-        self.last_score = max(-1.0, min(1.0, score))
-
-    def generate(self) -> Optional[AgentSignal]:
-        """
-        Convert last_score into a directional signal.
-        """
-        threshold = 0.0002  # 0.02% move
         
-        # If score is very small, keep flat but low confidence
+        # Calculate 1-minute price change %
+        change_pct = (candle.close - self.last_close) / self.last_close if self.last_close != 0 else 0
+        self.last_score = change_pct
+        self.last_close = candle.close
+        
+        print(f"[Sentiment] Close {self.last_close}, Change: {change_pct*100:.4f}%")
+    
+    def generate(self):
+        """
+        Convert price momentum into directional signal.
+        Even tiny moves (0.01%) will trigger a direction.
+        """
+        from backend.agents.signal_agents import TradingSignal  # adjust if different location
+        
+        # Threshold: 0.01% move is enough to pick a direction
+        threshold = 0.0001  # 0.01%
+        
         if abs(self.last_score) < threshold:
-            print(f"[Sentiment] dir=0, conf=0.050, score={self.last_score:.3f}")
-            return AgentSignal(
-                agent_id=self.agent_id,
+            # No meaningful move yet
+            return TradingSignal(
+                agent_id="sentiment",
                 direction=0,
                 confidence=0.05,
-                metadata={"sentiment_score": self.last_score},
             )
-
+        
+        # We have a directional move
         direction = 1 if self.last_score > 0 else -1
-        # Scale confidence by magnitude, capped
-        conf = min(0.4, max(0.1, abs(self.last_score) * 200))  # 0.1–0.4 range
-
-        print(f"[Sentiment] dir={direction}, conf={conf:.3f}, score={self.last_score:.3f}")
-
-        return AgentSignal(
-            agent_id=self.agent_id,
+        
+        # Confidence scales with magnitude
+        # Even tiny moves (0.01%) get 0.1 confidence, large moves cap at 0.3
+        confidence = min(0.3, max(0.1, abs(self.last_score) * 100))  # 0.1–0.3 range
+        
+        return TradingSignal(
+            agent_id="sentiment",
             direction=direction,
-            confidence=conf,
-            metadata={"sentiment_score": self.last_score},
+            confidence=confidence,
         )
+
 
 
 # ============================================================
