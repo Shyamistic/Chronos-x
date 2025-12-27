@@ -30,13 +30,16 @@ class SmartExecutionEngine:
         
         # Fetch current ticker
         ticker = self.client.get_ticker(symbol=symbol)
-        print("[SmartExecution] raw ticker:", ticker) 
-        if not ticker or "data" not in ticker:
+        print("[SmartExecution] raw ticker:", ticker)
+
+        if not ticker:
             return {"error": "Failed to fetch ticker"}
-        
-        ticker_data = ticker["data"]
-        bid = float(ticker_data.get("bid") or ticker_data.get("last"))
-        ask = float(ticker_data.get("ask") or ticker_data.get("last"))
+
+        # WEEX returns flat fields, not nested under 'data'
+        ticker_data = ticker
+        bid = float(ticker_data.get("best_bid") or ticker_data.get("last"))
+        ask = float(ticker_data.get("best_ask") or ticker_data.get("last"))
+
         
         # Calculate expected fill
         if side == "buy":
