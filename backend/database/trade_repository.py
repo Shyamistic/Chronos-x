@@ -2,6 +2,7 @@ from sqlalchemy import text
 from typing import List, Dict, Optional
 from datetime import datetime
 import logging
+import json
 from .connection import get_db
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,10 @@ class TradeRepository:
         """Insert trade into database."""
         try:
             with get_db() as db:
+                # Convert dicts to JSON strings
+                signals_json = json.dumps(trade.get("agent_signals", {}))
+                governance_json = json.dumps(trade.get("governance_approval", {}))
+                
                 db.execute(
                     text("""
                         INSERT INTO trades (
@@ -28,24 +33,26 @@ class TradeRepository:
                         ON CONFLICT (order_id) DO NOTHING
                     """),
                     {
-                        "order_id": trade.get("order_id"),
-                        "symbol": trade.get("symbol", "cmt_btcusdt"),
-                        "side": trade.get("side"),
+                        "order_id": str(trade.get("order_id")),
+                        "symbol": str(trade.get("symbol", "cmt_btcusdt")),
+                        "side": str(trade.get("side")),
                         "size": float(trade.get("size", 0)),
                         "entry_price": float(trade.get("entry_price", 0)),
-                        "exit_price": trade.get("exit_price"),
+                        "exit_price": float(trade.get("exit_price")) if trade.get("exit_price") else None,
                         "pnl": float(trade.get("pnl", 0)),
                         "slippage": float(trade.get("slippage", 0)) if trade.get("slippage") else None,
                         "latency": int(trade.get("execution_latency_ms", 0)) if trade.get("execution_latency_ms") else None,
-                        "signals": str(trade.get("agent_signals", {})),
-                        "governance": str(trade.get("governance_approval", {})),
-                        "status": trade.get("status", "EXECUTED"),
+                        "signals": signals_json,
+                        "governance": governance_json,
+                        "status": str(trade.get("status", "EXECUTED")),
                     }
                 )
                 logger.info(f"✅ Persisted trade {trade.get('order_id')} to database")
                 return True
         except Exception as e:
             logger.error(f"❌ Failed to persist trade: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     @staticmethod
