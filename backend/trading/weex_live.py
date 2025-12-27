@@ -202,30 +202,47 @@ class WeexTradingLoop:
         print("[WeexTradingLoop] Stopping...")
         self.running = False
     
-    async def _execute_position(self):
-        """Execute trade with all infrastructure."""
+        async def _execute_position(self):
+          """Execute trade with all infrastructure."""
         pos = self.paper_trader.open_position
         if not pos:
             return
-        
+
         try:
-            # Size position
+            # Size position (TradeRecord is a dataclass, use attributes)
             size_dict = self.kelly_sizer.calculate_position_size(
-                signal_confidence=pos.get("confidence", 0.6),
+                signal_confidence=getattr(pos, "ensemble_confidence", 0.6),
                 stop_loss_pct=0.02,
                 profit_target_pct=0.05,
-                current_price=pos.get("entry_price", 87500),
+                current_price=pos.entry_price,
             )
-            
+
             actual_size = size_dict["position_size"]
-            
+
             # Execute with quality gates
             result = self.smart_execution.execute_with_quality_gates(
                 symbol=self.symbol,
                 size=actual_size,
-                side=pos.get("side", "buy"),
-                entry_price=pos.get("entry_price", 87500),
+                side=pos.side,          # "buy" or "sell"
+                entry_price=pos.entry_price,
             )
+
+            if result.get("status") == "executed":
+                print(f"[WeexTradingLoop] Order placed: {result}")
+                self.open_positions.append(
+                    {
+                        "side": 1 if pos.side == "buy" else -1,
+                        "size": actual_size,
+                        "entry_price": pos.entry_price,
+                        "order_id": result.get("order_id"),
+                    }
+                )
+            else:
+                print(f"[WeexTradingLoop] Order rejected: {result}")
+
+        except Exception as e:
+            print(f"[WeexTradingLoop] Order placement failed: {e}")
+
             
             if result.get("status") == "executed":
                 print(f"[WeexTradingLoop] Order placed: {result}")
