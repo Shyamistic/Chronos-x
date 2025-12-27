@@ -44,7 +44,7 @@ class TradeRecord:
     regime: str = "unknown"
     contributing_agents: List[str] = None
     ensemble_confidence: float = 0.0
-    
+
     def __post_init__(self):
         if self.contributing_agents is None:
             self.contributing_agents = []
@@ -95,6 +95,9 @@ class PaperTrader:
         self.trades: List[TradeRecord] = []
         self.open_position: Optional[TradeRecord] = None
         self.governance_trigger_log: List[dict] = []
+
+        # Optional callback: will be set by API layer for monitor
+        self.on_trade_closed = None
 
     # ================================================================ #
     # Account state helpers
@@ -165,6 +168,7 @@ class PaperTrader:
         """
         # Detect regime
         regime = self._detect_regime(candle)
+        print(f"[PaperTrader] Candle {candle.timestamp} close={candle.close}, regime={regime.value}")
 
         # Update agents
         self.momentum_agent.update(candle)
@@ -186,7 +190,10 @@ class PaperTrader:
             signals.append(sig4)
 
         if not signals:
+            print("[PaperTrader] No signals this candle")
             return
+
+        print(f"[PaperTrader] {len(signals)} raw signals")
 
         # Get dynamic weights from bandit
         weights = self.portfolio_manager.sample_weights_for_regime(regime)
@@ -194,12 +201,18 @@ class PaperTrader:
 
         # Combine signals
         ensemble_decision = self.ensemble.combine(signals)
+        print(
+            f"[PaperTrader] Ensemble decision: dir={ensemble_decision.direction}, "
+            f"conf={ensemble_decision.confidence:.3f}"
+        )
+
         if ensemble_decision.direction == 0 or ensemble_decision.confidence <= 0:
+            print("[PaperTrader] Ensemble vetoed trade (flat or zero confidence)")
             return
 
         side = "buy" if ensemble_decision.direction > 0 else "sell"
 
-        # Position sizing: risk-based
+        # Position sizing: simple risk-based (governance will further cap)
         risk_pct = 0.0025
         risk_amount = self.equity * risk_pct
         stop_loss_distance = candle.close * 0.005
@@ -221,6 +234,11 @@ class PaperTrader:
         decision: GovernanceDecision = self.governance.evaluate(
             trading_signal, account_state
         )
+        print(
+            f"[PaperTrader] Governance: allow={decision.allow}, "
+            f"adj_size={decision.adjusted_size:.6f}, "
+            f"risk_score={decision.risk_score:.1f}, reason={decision.reason}"
+        )
 
         # Log governance trigger
         self._log_governance_trigger(
@@ -228,6 +246,7 @@ class PaperTrader:
         )
 
         if not decision.allow or decision.adjusted_size <= 0:
+            print("[PaperTrader] Trade blocked by governance or zero size")
             return
 
         final_size = decision.adjusted_size
@@ -247,6 +266,10 @@ class PaperTrader:
             regime=regime.value,
             contributing_agents=[s.agent_id for s in ensemble_decision.agent_signals],
             ensemble_confidence=ensemble_decision.confidence,
+        )
+        print(
+            f"[PaperTrader] Opened position side={side}, size={final_size:.6f}, "
+            f"price={candle.close}"
         )
 
     # ================================================================ #
@@ -308,6 +331,10 @@ class PaperTrader:
             ensemble_confidence=self.open_position.ensemble_confidence,
         )
 
+        # NEW: hook external monitor if set
+        if hasattr(self, "on_trade_closed") and callable(self.on_trade_closed):
+            self.on_trade_closed(trade)
+
         self.trades.append(trade)
         self.balance += pnl
         self.total_pnl += pnl
@@ -320,6 +347,11 @@ class PaperTrader:
             pnl=pnl,
             position_size=trade.size,
             entry_price=trade.entry_price,
+        )
+
+        print(
+            f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "
+            f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}"
         )
 
         self.open_position = None
