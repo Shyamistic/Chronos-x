@@ -156,8 +156,8 @@ class PaperTrader:
     # Main simulation APIs
     # ================================================================ #
 
-        async def run_live_simulation(self, candle_stream, hours: int = 24):
-          "Simulate N hours of trading on a candle async generator."""
+    async def run_live_simulation(self, candle_stream, hours: int = 24):
+        """Simulate N hours of trading on a candle async generator."""
         async for candle in candle_stream:
             await self.process_candle(candle)
 
