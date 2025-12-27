@@ -70,14 +70,9 @@ class WeexLiveStreamer:
         """
         Fetch latest candlestick from WEEX contract candles API.
 
-        Response format per docs [web:88]:
-          GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m
-
-        Typical data example (array of arrays):
-          [
-            [ "ts", "open", "high", "low", "close", "volume" ],
-            ...
-          ]
+        Contract Get Candlestick Data returns either:
+          - a list of candles: [[ts, open, high, low, close, vol], ...]
+          - or {"data": [...]} depending on environment. [web:88]
         """
         try:
             resp = self.client.get_candles(
@@ -85,8 +80,14 @@ class WeexLiveStreamer:
                 granularity=self.granularity,
                 limit=2,
             )
-            data: List = resp.get("data") or resp.get("candles") or resp
-            if not isinstance(data, list) or not data:
+
+            # If resp is already a list, use it directly; otherwise look for keys.
+            if isinstance(resp, list):
+                data = resp
+            else:
+                data = resp.get("data") or resp.get("candles") or []
+
+            if not data:
                 return None
 
             last = data[-1]
@@ -113,7 +114,7 @@ class WeexLiveStreamer:
                 "open": open_,
                 "high": high,
                 "low": low,
-                "close": close,
+                "close": close_,
                 "volume": vol,
             }
         except Exception as e:
