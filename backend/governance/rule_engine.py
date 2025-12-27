@@ -183,7 +183,7 @@ class Rule07_SignalQuality(GovernanceRule):
     
     def __init__(self):
         super().__init__("SignalQuality", priority=7)
-        self.min_confidence = 0.50
+        self.min_confidence = 0.20
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         if signal.confidence < self.min_confidence:
