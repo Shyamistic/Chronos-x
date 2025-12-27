@@ -64,6 +64,7 @@ class SmartExecutionEngine:
 
         # Gate 2: Latency
         latency_ms = (time.time() - start_time) * 1000
+        print("[SmartExecution] DEBUG latency_ms=", latency_ms, "max=", self.max_latency_ms)
         if latency_ms > self.max_latency_ms:
             print(
                 f"[SmartExecution] REJECTED: Latency "
