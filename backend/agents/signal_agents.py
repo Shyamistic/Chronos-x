@@ -386,11 +386,12 @@ class SentimentAgent:
 
     def generate(self) -> Optional[AgentSignal]:
         """
-        Convert last_score into a weak but non-zero directional signal.
+        Convert last_score into a directional signal.
         """
-        threshold = 0.0005  # 0.05% move
+        threshold = 0.0002  # 0.02% move
+        
+        # If score is very small, keep flat but low confidence
         if abs(self.last_score) < threshold:
-            # Very small move -> weak flat sentiment but non-zero confidence
             print(f"[Sentiment] dir=0, conf=0.050, score={self.last_score:.3f}")
             return AgentSignal(
                 agent_id=self.agent_id,
@@ -460,83 +461,38 @@ class EnsembleAgent:
 
         total_weight = 0.0
         weighted_dir = 0.0
-        weighted_conf = 0.0
-        directions: List[int] = []
-        confidences: List[float] = []
+        active = []
 
-        for sig in signals:
-            if sig.direction == 0:
-                continue
-            w = self.weights.get(sig.agent_id, 0.5)
-            total_weight += w
-            weighted_dir += w * sig.direction * max(sig.confidence, 0.01)
-            weighted_conf += w * sig.confidence
-            directions.append(sig.direction)
-            confidences.append(sig.confidence)
+        for s in signals:
+            w = self.weights.get(s.agent_id, 1.0)
+            active.append(s)
+            # Only push direction if non-zero
+            if s.direction != 0 and s.confidence > 0:
+                total_weight += w
+                weighted_dir += w * s.direction * s.confidence
 
+        # No directional contributors
         if total_weight == 0:
-            print("[Ensemble] All signals neutral -> flat")
+            print("[Ensemble] All signals neutral -> flat with small confidence")
+            # IMPORTANT: keep small non-zero confidence so downstream can choose
             return EnsembleDecision(
                 direction=0,
-                confidence=0.0,
-                agent_signals=signals,
+                confidence=0.05,
+                agent_signals=active,
                 metadata={"raw_score": 0.0, "disagreement_penalty": 0.0},
             )
 
-        avg_dir = weighted_dir / total_weight
-        avg_conf = max(0.0, min(1.0, weighted_conf / total_weight))
-
-        if len(directions) > 1:
-            dir_array = np.array(directions, dtype=float)
-            disagreement = 1.0 - abs(dir_array.mean())
-        else:
-            disagreement = 0.0
-
-        effective_conf = avg_conf * (1.0 - 0.5 * disagreement)
+        raw = weighted_dir / total_weight
+        direction = 1 if raw > 0 else -1
+        confidence = min(1.0, max(0.05, abs(raw)))
 
         print(
-            f"[Ensemble] raw_dir={avg_dir:.4f}, avg_conf={avg_conf:.3f}, "
-            f"disagree={disagreement:.3f}, eff_conf={effective_conf:.3f}"
-        )
-
-        # Very loose veto: only kill if essentially random
-        if abs(avg_dir) < 0.01 or effective_conf < 0.10:
-            print("[Ensemble] VETO flat: weak edge")
-            return EnsembleDecision(
-                direction=0,
-                confidence=effective_conf,
-                agent_signals=signals,
-                metadata={
-                    "raw_score": float(avg_dir),
-                    "disagreement_penalty": float(disagreement),
-                },
-            )
-
-        final_dir = 1 if avg_dir > 0 else -1
-
-        regime_factor = 1.0
-        if self.current_regime:
-            r = self.current_regime.lower()
-            if r == "trend" and any(
-                s.agent_id in ("momentum_rsi", "ml_classifier") for s in signals
-            ):
-                regime_factor = 1.1
-            elif r == "mean_reversion":
-                regime_factor = 0.95
-
-        final_conf = max(0.0, min(1.0, effective_conf * regime_factor))
-
-        print(
-            f"[Ensemble] FINAL dir={final_dir}, conf={final_conf:.3f}, "
-            f"regime={self.current_regime}, regime_factor={regime_factor:.2f}"
+            f"[Ensemble] FINAL dir={direction}, conf={confidence:.3f}, raw={raw:.4f}"
         )
 
         return EnsembleDecision(
-            direction=final_dir,
-            confidence=final_conf,
-            agent_signals=signals,
-            metadata={
-                "raw_score": float(avg_dir),
-                "disagreement_penalty": float(disagreement),
-            },
+            direction=direction,
+            confidence=confidence,
+            agent_signals=active,
+            metadata={"raw_score": float(raw), "disagreement_penalty": 0.0},
         )
