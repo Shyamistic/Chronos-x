@@ -194,6 +194,7 @@ class PaperTrader:
 
         # Update agents
         self.momentum_agent.update(candle)
+        self.sentiment_agent.update(candle)
         self._update_equity(mark_price=candle.close)
 
         # Generate signals from all agents
@@ -237,14 +238,18 @@ class PaperTrader:
         self.last_ensemble_decision = ensemble_decision
         self.last_regime = regime
 
-        if ensemble_decision.direction == 0 or ensemble_decision.confidence <= 0:
-            print("[PaperTrader] Ensemble vetoed trade (flat or zero confidence)")
+        if ensemble_decision.direction == 0:
+            print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
+            return
+
+        if ensemble_decision.confidence < 0.05:
+            print("[PaperTrader] Confidence too low (<0.05) -> no trade")
             return
 
         side = "buy" if ensemble_decision.direction > 0 else "sell"
 
         # Position sizing: simple risk-based (governance will further cap)
-        risk_pct = 0.0025
+        risk_pct = 0.0005  # 0.05% of equity per trade during testing
         risk_amount = self.equity * risk_pct
         stop_loss_distance = candle.close * 0.005
         size = risk_amount / stop_loss_distance

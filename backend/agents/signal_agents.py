@@ -357,38 +357,59 @@ class OrderFlowAgent:
 # ============================================================
 
 class SentimentAgent:
-    """Sentiment-based agent using external NLP/LLM (stubbed)."""
+    """Sentiment-based agent using price change as proxy for sentiment."""
 
     def __init__(self):
         self.agent_id = "sentiment"
-        self.last_sentiment_score: float = 0.0  # -1 to +1
+        self.last_score = 0.0
+        self._last_close = None
+
+    def update(self, candle: Candle):
+        """
+        Dummy sentiment: use simple price change as proxy for sentiment
+        until a real NLP sentiment feed is wired.
+        """
+        if self._last_close is None:
+            self._last_close = candle.close
+            self.last_score = 0.0
+            return
+
+        change = (candle.close - self._last_close) / self._last_close
+        self._last_close = candle.close
+
+        # Treat small up/down moves as sentiment
+        # +ve price change -> bullish sentiment, -ve -> bearish
+        self.last_score = change
 
     def update_sentiment(self, score: float):
-        self.last_sentiment_score = max(-1.0, min(1.0, score))
+        self.last_score = max(-1.0, min(1.0, score))
 
     def generate(self) -> Optional[AgentSignal]:
-        score = self.last_sentiment_score
-        direction = 0
-        confidence = 0.0
+        """
+        Convert last_score into a weak but non-zero directional signal.
+        """
+        threshold = 0.0005  # 0.05% move
+        if abs(self.last_score) < threshold:
+            # Very small move -> weak flat sentiment but non-zero confidence
+            print(f"[Sentiment] dir=0, conf=0.050, score={self.last_score:.3f}")
+            return AgentSignal(
+                agent_id=self.agent_id,
+                direction=0,
+                confidence=0.05,
+                metadata={"sentiment_score": self.last_score},
+            )
 
-        if score > 0.15:
-            direction = +1
-            confidence = float((score - 0.15) / 0.85)
-        elif score < -0.15:
-            direction = -1
-            confidence = float((abs(score) - 0.15) / 0.85)
+        direction = 1 if self.last_score > 0 else -1
+        # Scale confidence by magnitude, capped
+        conf = min(0.4, max(0.1, abs(self.last_score) * 200))  # 0.1–0.4 range
 
-        confidence = max(0.0, min(1.0, confidence))
-
-        print(
-            f"[Sentiment] dir={direction}, conf={confidence:.3f}, score={score:.3f}"
-        )
+        print(f"[Sentiment] dir={direction}, conf={conf:.3f}, score={self.last_score:.3f}")
 
         return AgentSignal(
             agent_id=self.agent_id,
             direction=direction,
-            confidence=confidence,
-            metadata={"sentiment_score": score},
+            confidence=conf,
+            metadata={"sentiment_score": self.last_score},
         )
 
 
