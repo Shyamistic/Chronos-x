@@ -20,6 +20,7 @@ from backend.backtester import Backtester
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
 from backend.trading.weex_client import WeexClient
 from backend.trading.weex_live import WeexTradingLoop
+from backend.trading.csv_live import csv_candle_stream
 
 app = FastAPI(title="ChronosX API", version="0.2.0")
 
@@ -187,16 +188,27 @@ async def agents_regime_stats():
 
 # Live Trading Control
 @app.post("/trading/live")
-async def control_live_trading(payload: LiveTradingControl):
-    """
-    Control live trading loop on WEEX.
-    action: "start" or "stop"
-    """
+async def control_live_trading(payload: LiveTradingMode):
     global weex_trading_loop, live_trading_task
 
     action = payload.action.lower()
 
     if action == "start":
+        if payload.mode == "csv":
+            # CSV playback mode
+            if live_trading_task is None or live_trading_task.done():
+                async def run_csv():
+                    async for candle in csv_candle_stream(
+                        payload.csv_path or "backend/data/sample_cmt_1h.csv",
+                        delay_sec=payload.delay_sec,
+                    ):
+                        await paper_trader.process_candle(candle)
+                live_trading_task = asyncio.create_task(run_csv())
+                return {"status": "csv live started"}
+            else:
+                return {"status": "live trading already running"}
+
+        # WEEX mode (existing)
         if weex_trading_loop is None:
             weex_trading_loop = WeexTradingLoop(
                 weex_client=weex_client,
@@ -204,22 +216,19 @@ async def control_live_trading(payload: LiveTradingControl):
                 symbol="cmt_btcusdt",
                 poll_interval=5.0,
             )
-
         if live_trading_task is None or live_trading_task.done():
             live_trading_task = asyncio.create_task(weex_trading_loop.start())
-            return {"status": "live trading started"}
+            return {"status": "weex live started"}
         else:
             return {"status": "live trading already running"}
 
     elif action == "stop":
         if weex_trading_loop is not None:
             await weex_trading_loop.stop()
-            if live_trading_task is not None:
-                await live_trading_task
+        if live_trading_task is not None:
+            live_trading_task.cancel()
             live_trading_task = None
-            return {"status": "live trading stopped"}
-        else:
-            return {"status": "live trading not running"}
+        return {"status": "live trading stopped"}
 
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
@@ -234,6 +243,11 @@ async def get_live_status():
         "current_regime": paper_trader.current_regime.value,
     }
 
+class LiveTradingMode(BaseModel):
+    action: str          # "start" or "stop"
+    mode: str = "weex"   # "weex" or "csv"
+    csv_path: str | None = None
+    delay_sec: float = 1.0
 
 # Analytics / Explainability
 @app.get("/analytics/trade-explanation/{trade_index}")
