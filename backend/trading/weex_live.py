@@ -149,7 +149,7 @@ class WeexTradingLoop:
         # Initialize infrastructure
         self.kelly_sizer = KellyCriterionSizer(account_equity=50000, max_risk_per_trade=0.02)
         self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)
-        self.smart_execution = SmartExecutionEngine(weex_client, max_slippage_pct=0.003, max_latency_ms=300)
+        self.smart_execution = SmartExecutionEngine(weex_client, max_slippage_pct=0.003, max_latency_ms=1500)
 
         self.running = False
         self.current_pnl = 0.0
