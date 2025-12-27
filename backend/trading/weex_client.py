@@ -4,7 +4,7 @@ Thin WEEX REST client for ChronosX.
 
 Supports:
 - Authenticated trading endpoints (place orders, set leverage, etc.)
-- Public market data (klines) for live candle streaming
+- Public market data (candles, ticker) for live price streaming.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class WeexClient:
         """
         Create HMAC SHA256 signature.
 
-        Adjust according to WEEX official signing rules if needed.
+        Adjust to official WEEX signing rules if needed.
         """
         payload = f"{timestamp}{method.upper()}{path}{body}"
         return hmac.new(
@@ -62,10 +62,10 @@ class WeexClient:
         sign = self._sign(ts, method, path, body)
         return {
             "Content-Type": "application/json",
-            "WEEX-API-KEY": self.api_key,
-            "WEEX-API-SIGN": sign,
-            "WEEX-API-TIMESTAMP": ts,
-            "WEEX-API-PASSPHRASE": self.api_passphrase,
+            "ACCESS-KEY": self.api_key,
+            "ACCESS-SIGN": sign,
+            "ACCESS-TIMESTAMP": ts,
+            "ACCESS-PASSPHRASE": self.api_passphrase,
         }
 
     def _request(
@@ -98,41 +98,55 @@ class WeexClient:
             return {"raw": resp.text}
 
     # ------------------------------------------------------------------
-    # Public market data
+    # Public market data (CONTRACT)
     # ------------------------------------------------------------------
 
-    def get_klines(self, symbol: str, interval: str = "1m", limit: int = 2) -> Dict[str, Any]:
+    def get_candles(
+        self,
+        symbol: str = "cmt_btcusdt",
+        granularity: str = "1m",
+        limit: int = 2,
+    ) -> Dict[str, Any]:
         """
         Get recent candlesticks for a contract symbol.
 
-        Contract API kline path (AI Wars docs):
-          GET /capi/v1/contract/kline
+        WEEX contract API: Get Candlestick Data [web:88]
+          GET /capi/v2/market/candles?symbol=cmt_btcusdt&granularity=1m
         """
         return self._request(
             "GET",
-            "/capi/v1/contract/kline",
-            params={
-                "symbol": symbol,
-                "interval": interval,
-                "limit": limit,
-            },
+            "/capi/v2/market/candles",
+            params={"symbol": symbol, "granularity": granularity, "limit": limit},
             auth=False,
         )
 
+    def get_ticker(self, symbol: str = "cmt_btcusdt") -> Dict[str, Any]:
+        """
+        Get latest contract ticker for a symbol.
+
+        From AI Wars Participant Guide: Price Ticker API [web:6].
+          GET /capi/v2/market/ticker?symbol=cmt_btcusdt
+        """
+        return self._request(
+            "GET",
+            "/capi/v2/market/ticker",
+            params={"symbol": symbol},
+            auth=False,
+        )
 
     # ------------------------------------------------------------------
-    # Trading endpoints (examples; adjust paths to actual WEEX API)
+    # Trading endpoints (examples; adjust paths as per docs)
     # ------------------------------------------------------------------
 
     def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
         """
         Set leverage for a contract.
 
-        Adjust endpoint / params to match WEEX leverage API.
+        Contract leverage API, path per WEEX docs. [web:6][web:95]
         """
         return self._request(
             "POST",
-            "/capi/v1/private/set-leverage",
+            "/capi/v2/account/adjustLeverage",
             json={"symbol": symbol, "leverage": leverage},
             auth=True,
         )
@@ -147,20 +161,16 @@ class WeexClient:
         client_order_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Place an order.
+        Place a contract order.
 
-        type_:
-          "1" = open long
-          "2" = open short
-          "3" = close long
-          "4" = close short
-
-        Adjust endpoint / parameter names to match WEEX docs.
+        Contract Place Order API: POST /capi/v2/order/placeOrder [web:94].
+        type_ examples (logical mapping):
+          "open_long", "open_short", "close_long", "close_short".
         """
         payload: Dict[str, Any] = {
             "symbol": symbol,
             "size": size,
-            "type": type_,
+            "type": type_,          # WEEX expects strings like "open_long"
             "price": price,
             "match_price": match_price,
         }
@@ -169,9 +179,7 @@ class WeexClient:
 
         return self._request(
             "POST",
-            "/capi/v1/private/order",
+            "/capi/v2/order/placeOrder",
             json=payload,
             auth=True,
         )
-
-
