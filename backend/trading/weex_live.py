@@ -65,17 +65,28 @@ class WeexLiveStreamer:
                 granularity=self.granularity,
                 limit=2,
             )
-            
+
+            # Normalize WEEX response
             if isinstance(resp, list):
                 data = resp
+            elif isinstance(resp, dict):
+                # Common WEEX pattern: {"code":0,"data":{"lists":[...]} }
+                if "data" in resp and isinstance(resp["data"], dict):
+                    if "lists" in resp["data"]:
+                        data = resp["data"]["lists"]
+                    else:
+                        data = resp["data"].get("candles") or resp["data"].get("list") or []
+                else:
+                    data = resp.get("data") or resp.get("candles") or []
             else:
-                data = resp.get("data") or resp.get("candles") or []
-            
+                data = []
+
             if not data:
                 return None
-            
+
             last = data[-1]
-            
+
+            # Case 1: dict candle
             if isinstance(last, dict):
                 ts = int(last.get("ts") or last.get("timestamp"))
                 open_ = float(last.get("open"))
@@ -83,14 +94,29 @@ class WeexLiveStreamer:
                 low = float(last.get("low"))
                 close = float(last.get("close"))
                 vol = float(last.get("volume") or last.get("vol") or 0)
+
+            # Case 2: flat list [ts, open, high, low, close, vol]
+            elif isinstance(last, list) and last and not isinstance(last[0], list):
+                ts = int(last[0])
+                open_ = float(last[1])
+                high = float(last[2])
+                low = float(last[3])
+                close = float(last[4])
+                vol = float(last[5]) if len(last) > 5 else 0.0
+
+            # Case 3: nested list [[ts, open, ...], ...]
+            elif isinstance(last, list) and last and isinstance(last[0], list):
+                inner = last[-1]
+                ts = int(inner[0])
+                open_ = float(inner[1])
+                high = float(inner[2])
+                low = float(inner[3])
+                close = float(inner[4])
+                vol = float(inner[5]) if len(inner) > 5 else 0.0
+
             else:
-                ts = int(last)
-                open_ = float(last)
-                high = float(last)
-                low = float(last)
-                close = float(last)
-                vol = float(last) if len(last) > 5 else 0.0
-            
+                return None
+
             return {
                 "timestamp": ts,
                 "open": open_,
