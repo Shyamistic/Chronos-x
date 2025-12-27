@@ -34,40 +34,33 @@ class WeexClient:
             print("[WeexClient] WARNING: missing API credentials. Trading calls will fail.")
 
     # ------------------------------------------------------------------
-    # Signing helpers (contract style)
+    # Core signing (matches WEEX AI Wars demo)
     # ------------------------------------------------------------------
 
-    def _sign(self, timestamp: str, method: str, path: str, body: str) -> str:
+    def _generate_signature(
+        self,
+        secret_key: str,
+        timestamp: str,
+        method: str,
+        request_path: str,
+        query_string: str,
+        body: str,
+    ) -> str:
         """
-        Contract API signing (AI Wars Quick Start style). [web:172]
-
-        message = timestamp + method.upper() + path + body
-        sign = HMAC_SHA256(secret, message).hexdigest()
+        message = timestamp + method.upper() + request_path + query_string + body
+        signature = HMAC_SHA256(secret_key, message).hexdigest()
+        [web:190][web:194]
         """
-        message = f"{timestamp}{method.upper()}{path}{body}"
+        message = timestamp + method.upper() + request_path + query_string + body
         return hmac.new(
-            self.api_secret.encode("utf-8"),
+            secret_key.encode("utf-8"),
             message.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
 
-    def _headers(
-        self,
-        method: str,
-        path: str,
-        body_str: str,
-    ) -> Dict[str, str]:
-        # Contract examples use ms timestamps. [web:172]
-        ts = str(int(time.time() * 1000))
-        sign = self._sign(ts, method, path, body_str)
-
-        return {
-            "Content-Type": "application/json",
-            "ACCESS-KEY": self.api_key,
-            "ACCESS-SIGN": sign,
-            "ACCESS-TIMESTAMP": ts,
-            "ACCESS-PASSPHRASE": self.api_passphrase,
-        }
+    # ------------------------------------------------------------------
+    # Low-level request helper
+    # ------------------------------------------------------------------
 
     def _request(
         self,
@@ -77,13 +70,37 @@ class WeexClient:
         json_body: Optional[Dict[str, Any]] = None,
         auth: bool = False,
     ) -> Dict[str, Any]:
+        # Build query_string exactly as in demo
+        query_string = ""
+        if params:
+            # They concatenate prebuilt "?k=v&k2=v2" in demo; keep deterministic order.
+            items = sorted(params.items())
+            query_string = "?" + "&".join(f"{k}={v}" for k, v in items)
+
         url = self.base_url + path
         body_str = "" if json_body is None else json.dumps(json_body, separators=(",", ":"))
 
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+
         if auth:
-            headers = self._headers(method, path, body_str)
-        else:
-            headers = {"Content-Type": "application/json"}
+            timestamp = str(int(time.time() * 1000))
+            signature = self._generate_signature(
+                self.api_secret,
+                timestamp,
+                method,
+                path,
+                query_string,
+                body_str,
+            )
+            headers.update(
+                {
+                    "ACCESS-KEY": self.api_key,
+                    "ACCESS-SIGN": signature,
+                    "ACCESS-TIMESTAMP": timestamp,
+                    "ACCESS-PASSPHRASE": self.api_passphrase,
+                    "locale": "en-US",
+                }
+            )
 
         print(
             f"[WeexClient] REQUEST {method} {path} "
@@ -94,8 +111,7 @@ class WeexClient:
 
         resp = requests.request(
             method=method.upper(),
-            url=url,
-            params=params,
+            url=url + query_string,
             data=body_str if json_body is not None else None,
             headers=headers,
             timeout=self.timeout,
@@ -114,7 +130,7 @@ class WeexClient:
             return {"raw": resp.text}
 
     # ------------------------------------------------------------------
-    # Public market data
+    # Public market data (no auth)
     # ------------------------------------------------------------------
 
     def get_candles(
@@ -176,4 +192,5 @@ class WeexClient:
             json_body=payload,
             auth=True,
         )
+
 
