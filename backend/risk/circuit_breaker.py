@@ -48,53 +48,54 @@ class MultiLayerCircuitBreaker:
         else:
             self.pnl_weekly = current_pnl
         
-        # Layer 1: Daily loss limit (-2%)
-        if self.pnl_daily < -self.equity * 0.02:
+        # ALPHA MODE: Loose thresholds for testing
+        # Layer 1: Daily loss limit (-10%)
+        if self.pnl_daily < -self.equity * 0.10:
             self.circuit_broken = True
             self.break_reason = f"Daily loss limit hit: {self.pnl_daily:.2f}"
             self.break_time = now
             print(f"[CircuitBreaker] Layer 1 TRIGGERED: {self.break_reason}")
             return True
         
-        # Layer 2: Weekly loss limit (-5%)
-        if self.pnl_weekly < -self.equity * 0.05:
+        # Layer 2: Weekly loss limit (-20%)
+        if self.pnl_weekly < -self.equity * 0.20:
             self.circuit_broken = True
             self.break_reason = f"Weekly loss limit hit: {self.pnl_weekly:.2f}"
             self.break_time = now
             print(f"[CircuitBreaker] Layer 2 TRIGGERED: {self.break_reason}")
             return True
         
-        # Layer 3: Portfolio concentration
+        # Layer 3: Portfolio concentration (80%)
         if len(open_positions) > 0:
             long_count = sum(1 for pos in open_positions if pos.get("side") > 0)
             short_count = sum(1 for pos in open_positions if pos.get("side") < 0)
-            if max(long_count, short_count) / len(open_positions) > 0.75:
+            if max(long_count, short_count) / len(open_positions) > 0.80:
                 self.circuit_broken = True
                 self.break_reason = f"Portfolio too concentrated"
                 self.break_time = now
                 print(f"[CircuitBreaker] Layer 3 TRIGGERED: {self.break_reason}")
                 return True
         
-        # Layer 4: Leverage limit (3:1 max)
-        if leverage_ratio > 3.0:
+        # Layer 4: Leverage limit (5:1 max)
+        if leverage_ratio > 5.0:
             self.circuit_broken = True
-            self.break_reason = f"Leverage exceeded: {leverage_ratio:.1f}x > 3.0x"
+            self.break_reason = f"Leverage exceeded: {leverage_ratio:.1f}x > 5.0x"
             self.break_time = now
             print(f"[CircuitBreaker] Layer 4 TRIGGERED: {self.break_reason}")
             return True
         
-        # Layer 5: Margin buffer (75% free margin)
-        if free_margin_pct < 0.25:
+        # Layer 5: Margin buffer (15% free margin)
+        if free_margin_pct < 0.15:
             self.circuit_broken = True
             self.break_reason = f"Margin buffer insufficient: {free_margin_pct:.1%} free"
             self.break_time = now
             print(f"[CircuitBreaker] Layer 5 TRIGGERED: {self.break_reason}")
             return True
         
-        # Layer 6: Max portfolio drawdown (12%)
-        if current_pnl < -self.equity * 0.12:
+        # Layer 6: Max portfolio drawdown (25%)
+        if current_pnl < -self.equity * 0.25:
             self.circuit_broken = True
-            self.break_reason = f"Max drawdown limit: {current_pnl / self.equity:.1%} < -12%"
+            self.break_reason = f"Max drawdown limit: {current_pnl / self.equity:.1%} < -25%"
             self.break_time = now
             print(f"[CircuitBreaker] Layer 6 TRIGGERED: {self.break_reason}")
             return True

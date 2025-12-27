@@ -213,6 +213,22 @@ class PaperTrader:
         if sig4:
             signals.append(sig4)
 
+        # ALPHA: Fallback trend signal if no directional signals
+        if not any(s.direction != 0 for s in signals):
+            if len(self.momentum_agent.history) >= 20:
+                closes = [c.close for c in self.momentum_agent.history[-20:]]
+                sma20 = sum(closes) / len(closes)
+                trend_dir = 1 if candle.close > sma20 else -1
+                from backend.agents.signal_agents import AgentSignal
+                trend_sig = AgentSignal(
+                    agent_id="trend_fallback",
+                    direction=trend_dir,
+                    confidence=0.12,
+                    metadata={"sma20": sma20, "close": candle.close}
+                )
+                signals.append(trend_sig)
+                print(f"[PaperTrader] ALPHA: Fallback trend signal dir={trend_dir}, conf=0.12")
+
         if not signals:
             print("[PaperTrader] No signals this candle")
             return

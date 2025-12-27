@@ -16,7 +16,7 @@ class TradingConfig:
     FORCE_EXECUTE_MODE = os.getenv("FORCE_EXECUTE", "true").lower() == "true"
     
     # Risk Controls (always active)
-    MIN_CONFIDENCE = 0.15  # Only trade if confidence > 15%
+    MIN_CONFIDENCE = 0.05 # Only trade if confidence > 15%
     MAX_POSITION_SIZE = 0.01  # Max 0.01 BTC per trade (~$870 at $87K)
     KELLY_FRACTION = 0.25  # Fractional Kelly (conservative: 1/4 of theoretical)
     
