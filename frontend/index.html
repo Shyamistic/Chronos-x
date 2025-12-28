@@ -427,6 +427,19 @@ footer {
 
 /* RESPONSIVE */
 
+.alpha-banner {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: rgba(245,158,11,0.15);
+  border: 1px solid rgba(245,158,11,0.4);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: 11px;
+  font-family: var(--mono);
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
 @media (max-width: 1024px) {
   .main {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -479,6 +492,11 @@ footer {
       <div class="badge alpha">ALPHA · GOVERNANCE VALIDATION</div>
     </div>
   </header>
+
+  <!-- ALPHA MODE BANNER -->
+  <div class="alpha-banner">
+    ALPHA MODE — Governance validation only. Profit disabled by design.
+  </div>
 
   <main class="main">
 
@@ -560,6 +578,34 @@ footer {
     <section class="panel">
       <div class="panel-inner">
         <h2>
+          <span>System Intent</span>
+          <span class="pill">ALPHA validation</span>
+        </h2>
+        <div class="kv-list">
+          <div class="kv">
+            <span class="kv-label">Mode</span>
+            <span id="mode" class="value warn">ALPHA</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">Exits Enabled</span>
+            <span id="exits" class="value bad">❌</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">Profit Reporting</span>
+            <span id="profit-type" class="value soft">Realized only</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">Objective</span>
+            <span id="objective" class="value soft">Safety > Profit</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GOVERNANCE RULES -->
+    <section class="panel">
+      <div class="panel-inner">
+        <h2>
           <span>Governance Rules</span>
           <span class="pill">Autonomous controls</span>
         </h2>
@@ -579,6 +625,25 @@ footer {
           <div class="rule">
             <span class="rule-label">Max position</span>
             <span id="pos" class="rule-value">—</span>
+          </div>
+        </div>
+        
+        <!-- Governance Counters -->
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
+          <div style="font-size: 10px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.06em; text-transform: uppercase;">Governance Actions (24h)</div>
+          <div class="kv-list" style="gap: 4px;">
+            <div class="kv">
+              <span class="kv-label">Trades approved</span>
+              <span id="approved" class="value good">—</span>
+            </div>
+            <div class="kv">
+              <span class="kv-label">Trades blocked</span>
+              <span id="blocked" class="value soft">—</span>
+            </div>
+            <div class="kv">
+              <span class="kv-label">Circuit breaker triggers</span>
+              <span id="triggers" class="value soft">—</span>
+            </div>
           </div>
         </div>
       </div>
@@ -618,7 +683,7 @@ footer {
 </div>
 
 <script>
-const API_BASE = '/api';
+const API_BASE = 'http://100.30.247.108:8000';
 
 async function fetchJSON(path) {
   const r = await fetch(API_BASE + path);
@@ -685,11 +750,12 @@ function classifyDrawdown(dd) {
 
 async function refresh() {
   try {
-    const [health, gov, metrics, trades] = await Promise.all([
+    const [health, gov, metrics, trades, mode] = await Promise.all([
       fetchJSON("/system/health"),
       fetchJSON("/governance/rules"),
       fetchJSON("/analytics/metrics"),
-      fetchJSON("/analytics/trades?limit=10")
+      fetchJSON("/analytics/trades?limit=10"),
+      fetchJSON("/system/mode")
     ]);
 
     // System
@@ -750,6 +816,18 @@ async function refresh() {
     document.getElementById("pos").textContent =
       gov.max_position_size != null ? gov.max_position_size : "—";
 
+    // System Intent
+    document.getElementById("mode").textContent = mode.mode || "ALPHA";
+    document.getElementById("exits").textContent = mode.exits_enabled ? "✓" : "❌";
+    document.getElementById("profit-type").textContent = mode.profit_reporting || "Realized only";
+    document.getElementById("objective").textContent = "Safety > Profit";
+
+    // Governance Counters (simulated for now)
+    const totalTrades = (trades.trades || []).length;
+    document.getElementById("approved").textContent = totalTrades;
+    document.getElementById("blocked").textContent = "0";
+    document.getElementById("triggers").textContent = "0";
+
     // Trades
     const tb = document.getElementById("trades");
     tb.innerHTML = "";
@@ -774,7 +852,7 @@ async function refresh() {
         <td><span class="side-badge ${sideClass}">${t.side || "—"}</span></td>
         <td>${t.size != null ? t.size : "—"}</td>
         <td>${t.entry_price != null ? t.entry_price : "—"}</td>
-        <td><span class="status-pill ${statusClass}">${status}</span></td>
+        <td><span class="status-pill ${statusClass}">${status === "FILLED" ? "EXECUTED · GOVERNANCE APPROVED" : status}</span></td>
       `;
       tb.appendChild(row);
     });

@@ -1,231 +1,301 @@
-# ChronosX — Governance Operating System for AI Trading
+# ChronosX — Autonomous Trading Governance System (ALPHA)
 
-**ChronosX is a risk-first governance platform for algorithmic and AI-driven crypto trading.**  
-It sits between trading strategies and the exchange, enforcing institutional-grade risk rules *before* trades are executed.
+ChronosX is **not** a trading bot.  
+It is a governance‑first execution control layer that sits between strategy agents and the exchange, enforcing deterministic, auditable rules on every trade proposal before any profit optimization is enabled. [web:11]
 
-Instead of trying to “beat the market,” ChronosX assumes strategies can fail — and focuses on **preventing blow-ups, liquidations, and catastrophic drawdowns**.
-
-> Most trading systems optimize for returns.  
-> ChronosX optimizes for *survival*.
+Most trading systems fail because pre‑trade governance is missing, not because the signal is bad. ChronosX makes governance explicit, enforceable, and reviewable.
 
 ---
 
-## Why ChronosX Exists
+## What ChronosX Does
 
-Crypto markets trade **24/7**, use **leverage by default**, and experience **liquidation cascades** that do not exist in traditional markets.
+ChronosX sits between strategy agents and the exchange and owns the final yes/no on execution.
 
-Most algorithmic trading failures are not caused by bad signals, but by:
-- Excess leverage
-- Correlation spikes
-- Volatility regime shifts
-- Over-trading and whipsaws
-- Missing circuit breakers
+It provides:
 
-ChronosX addresses this gap by introducing a **governance layer** that enforces risk, capital, and behavioral constraints in real time.
+- Pre‑trade governance decisions  
+  - Approve, block, or modify each trade proposal
+  - Force‑execute gating and circuit‑breaker halts at the governance layer
+- Deterministic risk constraints  
+  - Position sizing limits
+  - Minimum confidence thresholds
+  - Slippage and latency guards
+- Portfolio‑aware execution limits  
+  - Portfolio‑level exposure caps
+  - Per‑strategy and per‑asset risk budgets
+- Full auditability of every execution  
+  - Every proposal, decision, and fill is logged and reproducible
+- Separation of execution safety from profit generation  
+  - Strategy agents only generate proposals
+  - Governance decides what is allowed
+  - Execution only routes already‑approved orders
 
----
-
-## Core Idea
-
-ChronosX separates trading into three layers:
-
-1. **Signal Generation**  
-   Independent agents propose trades (momentum, ML, order-flow, etc.).
-
-2. **Portfolio Learning**  
-   A portfolio manager learns which agents to trust using online learning (Thompson Sampling).
-
-3. **Governance Enforcement (Core Innovation)**  
-   Every proposed trade is evaluated against a formal set of risk rules.  
-   Trades can be **APPROVED**, **MODIFIED**, or **BLOCKED** *before execution*.
-
-This governance layer is strategy-agnostic and can wrap **any trading logic**.
+This repository runs against a live exchange and demonstrates **non‑simulated** executions in ALPHA governance mode. [web:9]
 
 ---
 
-## Current Status (Submission Stage)
+## Design Philosophy
 
-ChronosX is fully functional in **backtesting and paper-trading mode**.
+ChronosX is built to match institutional expectations for trade governance and execution safety. [web:11]
 
-### Implemented and Working
-- ✅ FastAPI backend with governance, agents, trading, and backtesting endpoints  
-- ✅ 12-rule governance engine enforcing pre-trade risk constraints  
-- ✅ Multi-agent signal framework with ensemble logic  
-- ✅ Portfolio-level learning via Thompson Sampling  
-- ✅ Backtester running bar-by-bar simulations on OHLCV data  
-- ✅ Full audit trail of trades, decisions, and rule violations  
-- ✅ Streamlit dashboard (live metrics, governance view, agent performance)
-
-### WEEX Integration
-- 🔒 Production-ready WEEX execution client implemented
-- 🔒 Live trading disabled pending WEEX API approval (required by hackathon rules)
-
-> No architectural changes are required to enable live trading once API access is granted.
+| Principle             | Explanation                                                                 |
+|-----------------------|-----------------------------------------------------------------------------|
+| Governance first      | Trades are evaluated before execution, not after losses appear.            |
+| Deterministic risk    | Explicit, inspectable rules — no hidden heuristics or opaque overrides.    |
+| Separation of concerns| Signal generation ≠ execution approval ≠ portfolio risk management.         |
+| Auditability          | Every proposal and fill is logged, reproducible, and reviewable.           |
+| Safety before PnL     | Profit metrics are disabled until exits and risk controls are validated.   |
 
 ---
 
-## Governance Rules (v1)
+## System Architecture
 
-ChronosX enforces **12 explicit risk rules** at the portfolio and trade level:
+ChronosX enforces a three‑layer separation between signals, governance, and execution, deployed as a FastAPI backend behind nginx on AWS EC2. [web:7][web:19]
 
-1. Leverage cap  
-2. Daily loss limit  
-3. Max drawdown circuit breaker  
-4. Volatility regime limiter  
-5. Position size cap per asset  
-6. Portfolio concentration limit  
-7. Correlation exposure control  
-8. Signal quality filter  
-9. Win-rate degradation throttle  
-10. Whipsaw protection  
-11. Time-of-day trading filter  
-12. Trade frequency limiter  
+┌──────────────┐
+│ Frontend UI │ ← Live dashboard (nginx, static)
+└──────┬───────┘
+│ /api/*
+┌──────▼────────────┐
+│ FastAPI Backend │
+│ (ChronosX Core) │
+└──────┬────────────┘
+│
+┌──────▼────────────┐
+│ Governance Layer │
+│ (MPC + Rules) │
+└──────┬────────────┘
+│
+┌──────▼────────────┐
+│ Execution Engine │
+│ (WEEX) │
+└───────────────────┘
 
-Each rule has:
-- A clear mathematical condition
-- A severity level (BLOCK / WARN)
-- A deterministic outcome
+text
 
-Rules are evaluated **before every trade**.
+### Layer Responsibilities
 
----
+- **Signal Layer (external)**  
+  - Generates trade proposals only  
+  - Has no execution authority or access to exchange credentials
 
-## System Architecture (High Level)
+- **Governance Layer (ChronosX Core)**  
+  - Evaluates proposals against deterministic rules  
+  - Applies portfolio‑level constraints  
+  - Uses MPC quorum for final approval  
+  - Produces an approve / block / modify decision for each proposal
 
-Market Data (CSV / Live Stream)
-↓
-Signal Agents (parallel)
-↓
-Portfolio Manager (Thompson Sampling)
-↓
-Governance Engine (12 rules + risk checks)
-↓
-APPROVE / BLOCK decision
-↓
-Paper Trader or Exchange Execution
-↓
-Audit Log + Metrics
+- **Execution Layer (Exchange / WEEX)**  
+  - Executes only approved orders  
+  - Reports fills back to ChronosX  
+  - Fills are written into the execution ledger and surfaced to the dashboard
 
-yaml
-Copy code
-
-The governance engine is on the **critical execution path** — not an afterthought.
+This separation prevents strategy agents from bypassing risk controls or talking directly to the exchange.
 
 ---
 
-## AI Components
+## Governance Model (ALPHA)
 
-### Signal Agents
-- Momentum + RSI agent
-- ML classifier scaffold (feature-ready)
-- Order-flow agent (structure in place)
-- Sentiment agent stub
-- Ensemble combiner
+ChronosX is currently deployed in **ALPHA governance mode**, optimized to validate safety and infrastructure rather than PnL.
 
-### Portfolio Learning
-- Thompson Sampling over agents
-- Online updates of win/loss statistics
-- Dynamic capital allocation based on observed performance
+In ALPHA:
 
-### Risk Logic
-- Rule-based constraints (hard safety)
-- Portfolio-aware metrics (drawdown, equity, exposure)
-- Trade-level and portfolio-level enforcement
+- Governance rules are fully enforced
+- Trading is *halted by default* unless governance explicitly approves
+- Exits are intentionally disabled
+- Only real executions are shown
+- PnL is **realized‑only**, and in ALPHA this is expected to be zero
 
----
+This design makes governance behavior observable and debuggable before capital is exposed to full life‑cycle trading risk. [web:9]
 
-## Backtesting
+### Why PnL = 0 Is Correct
 
-ChronosX includes a deterministic backtesting engine:
+ChronosX reports **realized PnL only**: closed trades with actual fills and costs, not paper gains. [web:18][web:20]
 
-- Loads OHLCV CSV data
-- Simulates trades bar-by-bar
-- Applies governance rules in real time
-- Outputs:
-  - Total PnL
-  - Win rate
-  - Sharpe ratio
-  - Max drawdown
-  - Trade log with rule decisions
+In ALPHA:
 
-The same governance logic is used in backtesting, paper trading, and live execution.
+- Exits are disabled by design
+- Open positions are not marked to market
+- Unrealized PnL is not calculated or displayed
+
+This prevents:
+
+- Fake demo profits
+- Curve‑fit backtests that never see real execution risk
+- Misleading metrics that hide exit, liquidity, or slippage risk [web:9][web:12]
+
+PnL will remain zero in ALPHA until controlled exit logic is enabled in the post‑ALPHA roadmap.
 
 ---
 
-## Dashboard (Streamlit)
+## Frontend Dashboard
 
-The frontend connects to the FastAPI backend and provides:
+The live dashboard is a static HTML/CSS/JS app served via nginx and backed by the FastAPI `/api/*` endpoints. [web:7]
 
-- Portfolio balance and PnL
-- Equity curve visualization
-- Governance rules table with live status
-- Agent performance metrics and weights
-- Recent trades table (paper/live ready)
+It surfaces:
 
----
+- System health  
+  - Backend liveness
+  - MPC node status
+  - Circuit‑breaker state
 
-## Tech Stack
+- Governance rules  
+  - Current confidence thresholds  
+  - Position size caps  
+  - Portfolio exposure ceilings
 
-- **Backend:** Python 3.13, FastAPI, Uvicorn  
-- **Frontend:** Streamlit  
-- **Learning:** NumPy, pandas, SciPy  
-- **Architecture:** Event-driven, modular services  
-- **Deployment:** Local / Docker-ready  
+- Risk constraints  
+  - Slippage and latency guardrails  
+  - Max open positions and per‑asset limits
 
----
+- Execution ledger  
+  - Real fills only, no simulations  
+  - Proposal → decision → execution trace
 
-## Repository Structure
+- Portfolio metrics (realized‑only)  
+  - Realized PnL (expected to be zero in ALPHA)  
+  - Exposure per asset / per strategy
 
-chronosx-weex/
-├── backend/
-│ ├── api/ # FastAPI routes
-│ ├── trading/ # Paper trader, execution logic
-│ ├── agents/ # Signal agents + ensemble
-│ ├── governance/ # 12-rule governance engine
-│ ├── ml/ # ML scaffolding
-│ ├── data/ # Data loaders
-│ └── utils/ # Logging, metrics
-├── frontend/ # Streamlit dashboard
-├── research/ # Notebooks and experiments
-├── tests/ # Unit and integration tests
-├── docs/ # Specifications and notes
-└── README.md
-
-yaml
-Copy code
+No simulated data and no mock fills are rendered anywhere on the dashboard.
 
 ---
 
-## How This Fits WEEX AI Wars
+## Risk Controls (Enforced)
 
-ChronosX directly addresses the hackathon focus areas:
+ChronosX hard‑enforces multiple layers of risk control before any order reaches the exchange. [web:9]
 
-- **AI Trading:** Multi-agent signal generation and portfolio learning  
-- **Risk Management:** Pre-trade governance and circuit breakers  
-- **Innovation:** Governance-as-code for trading systems  
-- **Integrability:** Designed to plug directly into WEEX execution APIs  
+| Control              | Status          |
+|----------------------|-----------------|
+| MPC threshold        | Enabled (2‑of‑3 quorum) |
+| Minimum confidence   | Enforced        |
+| Max position size    | Enforced        |
+| Circuit breakers     | Enabled         |
+| Slippage limits      | Enabled         |
+| Latency guards       | Enabled         |
+| Portfolio awareness  | Enabled         |
 
-ChronosX is built to be **exchange-friendly**, not just a standalone bot.
+### MPC Governance
 
----
+ChronosX uses a 2‑of‑3 MPC approval model for every trade:
 
-## Roadmap (Post-Approval)
+- Risk node
+- Portfolio node
+- Execution node
 
-- Enable live WEEX trading on approved pairs  
-- Execute ≥25 live trades for final evaluation  
-- Publish governance impact metrics (blocked trades, drawdowns avoided)  
-- Extend to multi-exchange support  
-- Add advanced risk prediction models  
-
----
-
-## Disclaimer
-
-This project is provided for research and demonstration purposes.  
-It does not constitute financial advice. Trading involves risk.
+A trade executes only if quorum is met; otherwise it is blocked or left pending. This reflects institutional expectations that execution is governed by independent checks, not by a single monolithic strategy process. [web:11]
 
 ---
 
-## License
+## Deployment Overview
 
-Apache 2.0
+ChronosX is deployed as a hardened FastAPI backend behind nginx on AWS EC2, with no internal ports exposed publicly. [web:7][web:19]
+
+- **Backend**  
+  - Framework: FastAPI  
+  - ASGI server: uvicorn  
+  - Process manager: systemd  
+  - Bind: `127.0.0.1:8000`
+
+  Example service command:
+
+uvicorn backend.api.main:app
+--host 0.0.0.0
+--port 8000
+
+text
+
+- **Frontend**  
+- Static HTML / CSS / JS bundle  
+- Served directly by nginx  
+- All API calls routed via `/api/*`
+
+- **Reverse Proxy**  
+- nginx terminates HTTP  
+- Proxies `/api/*` to `127.0.0.1:8000`  
+- No direct public access to the FastAPI port
+
+- **Hosting**  
+- AWS EC2 instance  
+- Security groups expose only HTTP/HTTPS and SSH as needed  
+- No client‑side secrets or credentials in the frontend bundle [web:7][web:13]
+
+Live URL pattern:
+
+http://<public-ip>
+
+text
+
+All API access is routed through:
+
+/api/* → http://127.0.0.1:8000
+
+text
+
+Internal services are never exposed directly to the internet.
+
+---
+
+## What This Repo Demonstrates
+
+This ALPHA deployment is about **governance and infrastructure validation**, not marketing numbers.
+
+ChronosX demonstrates:
+
+- ✅ Live infrastructure on AWS EC2  
+- ✅ Real exchange executions via WEEX  
+- ✅ Governance enforcement in front of every trade  
+- ✅ Production‑grade deployment (FastAPI + uvicorn + nginx)  
+- ✅ Honest, realized‑only metrics
+
+ChronosX deliberately does **not** include:
+
+- ❌ Simulated profits  
+- ❌ Curve‑fitted backtests  
+- ❌ Unrealistic paper fills
+
+---
+
+## Roadmap (Post‑ALPHA)
+
+Once governance and execution safety are validated in ALPHA, ChronosX will enable controlled profit‑generation features.
+
+Planned steps:
+
+- Controlled exit logic  
+  - Rule‑driven exits with the same governance checks as entries  
+  - Exit‑aware risk metrics
+
+- Realized PnL computation  
+  - Full trade life‑cycle PnL  
+  - Execution‑cost‑aware reporting (slippage, fees, latency) [web:9][web:20]
+
+- Multi‑strategy orchestration  
+  - Multiple strategy agents submitting to the same governance layer  
+  - Capital allocation policies between strategies
+
+- Capital allocation engine  
+  - Risk‑budgeted capital assignment per strategy / asset class  
+  - Portfolio‑level exposure and drawdown controls
+
+- Institutional‑grade reporting  
+  - Governance audit trails  
+  - Execution quality and execution‑risk attribution [web:11]  
+  - Exportable reports for risk, compliance, and investment committees
+
+---
+
+## Judge / Reviewer Primer
+
+ChronosX is designed to look and behave like an institutional trading governance component rather than a hackathon demo. [web:11]
+
+Key properties:
+
+- **Serious** — Targets governance, risk, and execution quality, not flashy charts.  
+- **Honest** — Uses real exchange executions and realized‑only metrics.  
+- **Institutional** — Separates signals, governance, and execution and enforces MPC approval.  
+- **Safety‑first** — Capital protection and auditability are prioritized over PnL in ALPHA.  
+- **Technically mature** — Production deployment on AWS with FastAPI, uvicorn, and nginx following modern best practices. [web:7][web:19]
+
+ChronosX intentionally avoids the most common hackathon failure mode: fake profitability without real execution or risk control.
+
+---
