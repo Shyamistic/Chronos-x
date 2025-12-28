@@ -380,32 +380,28 @@ async def weex_api_test():
     WEEX API compliance test - triggers authenticated API call to prove integration.
     This is what WEEX needs to see to mark your project as "API testing passed".
     """
-    global tradingloop
-    
-    if not tradingloop or not tradingloop.weex_client:
-        return JSONResponse(
-            status_code=503,
-            content={"error": "WEEX client not initialized"}
-        )
+    from backend.trading.weex_client import WeexClient
     
     try:
-        # Trigger the safe API test
-        result = tradingloop.weex_client.api_test()
+        # Create WEEX client directly (self-contained, no dependencies)
+        client = WeexClient()
+        result = client.api_test()
         
         return {
-            "message": "WEEX API compliance test executed",
+            "status": "success",
+            "authenticated": True,
             "result": result,
+            "message": "WEEX API compliance test executed",
             "note": "This authenticated call should register with WEEX for API testing verification"
         }
     
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "WEEX API test failed",
-                "detail": str(e)
-            }
-        )
+        return {
+            "status": "failed",
+            "authenticated": False,
+            "error": str(e),
+            "message": "WEEX API test failed"
+        }
 
 
 @app.get("/system/alpha-disclaimer")
