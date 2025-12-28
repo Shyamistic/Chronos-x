@@ -205,29 +205,43 @@ class WeexClient:
         """
         return self._request(
             "GET",
-            "/capi/v2/account/balance",
+            "/capi/v2/account/accounts",
             auth=True,
         )
 
     def api_test(self) -> Dict[str, Any]:
         """
-        WEEX API compliance test - fetches account balance to prove authentication.
+        WEEX API compliance test - tries multiple endpoints to find working one.
         This is what WEEX needs to see to mark API testing as "passed".
         """
-        try:
-            print("[WeexClient] Starting WEEX API compliance test...")
-            balance_response = self.get_account_balance()
-            print(f"[WeexClient] ✅ WEEX API test successful: {balance_response}")
-            return {
-                "status": "success",
-                "test_type": "account_balance_fetch",
-                "response": balance_response,
-                "timestamp": time.time()
-            }
-        except Exception as e:
-            print(f"[WeexClient] ❌ WEEX API test failed: {e}")
-            return {
-                "status": "failed",
-                "error": str(e),
-                "timestamp": time.time()
-            }
+        endpoints_to_try = [
+            "/capi/v2/account/accounts",
+            "/capi/v2/account/balance", 
+            "/capi/v2/account/account",
+            "/capi/v1/account/accounts"
+        ]
+        
+        for endpoint in endpoints_to_try:
+            try:
+                print(f"[WeexClient] Trying endpoint: {endpoint}")
+                response = self._request("GET", endpoint, auth=True)
+                print(f"[WeexClient] ✅ WEEX API test successful with {endpoint}: {response}")
+                return {
+                    "status": "success",
+                    "test_type": "account_fetch",
+                    "endpoint": endpoint,
+                    "response": response,
+                    "timestamp": time.time()
+                }
+            except Exception as e:
+                print(f"[WeexClient] Endpoint {endpoint} failed: {e}")
+                continue
+        
+        # If all endpoints fail
+        print(f"[WeexClient] ❌ All WEEX API endpoints failed")
+        return {
+            "status": "failed",
+            "error": "All endpoints returned 404 - possible API version mismatch",
+            "endpoints_tried": endpoints_to_try,
+            "timestamp": time.time()
+        }
