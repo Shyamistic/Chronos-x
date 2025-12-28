@@ -63,6 +63,10 @@ class TradingSignal:
             self.metadata = {}
 
 
+# Alias for backward compatibility
+AgentSignal = TradingSignal
+
+
 @dataclass
 class TradingDecision:
     """Final ensemble decision."""

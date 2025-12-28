@@ -183,31 +183,18 @@ class WeexTradingLoop:
         self._print_startup_banner()
 
     def _print_startup_banner(self):
-        mode = (
-            "ALPHA (force_execute=true, NO governance)"
-            if TradingConfig.FORCE_EXECUTE_MODE
-            else "PRODUCTION (governance required)"
-        )
         print(
             """
 ================================================================================
 [WeexTradingLoop] TRADING CONFIGURATION
 ================================================================================
-Mode:                   {}
-Min Confidence:         {}
-Max Position Size:      {} BTC
-Kelly Fraction:         {}
 Account Equity:         $50,000
 Circuit Breaker:        6-layer enabled
 Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
 ================================================================================
-        """.format(
-                mode,
-                TradingConfig.MIN_CONFIDENCE,
-                TradingConfig.MAX_POSITION_SIZE,
-                TradingConfig.KELLY_FRACTION,
-            )
+        """
         )
+        TradingConfig.print_config()
 
     async def run(self):
         """Start live trading loop."""
@@ -343,7 +330,9 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                     "pnl": 0.0,  # Will be updated on exit
                     "slippage": exec_result.get("slippage", 0.0),
                     "execution_latency_ms": exec_result.get("latency_ms", 0),
-                    "status": "EXECUTED"
+                    "status": "EXECUTED",
+                    "agent_signals": {"confidence": confidence, "direction": direction},
+                    "governance_approval": {"approved": True, "mode": "ALPHA"}
                 }
                 self.monitor.record_trade(trade_record)
 

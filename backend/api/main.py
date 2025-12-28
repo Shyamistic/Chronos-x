@@ -364,6 +364,25 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
+@app.get("/system/alpha-disclaimer")
+async def get_alpha_disclaimer():
+    """
+    Return explicit disclaimer about ALPHA mode.
+    For judges and due diligence.
+    """
+    return {
+        "mode": "ALPHA",
+        "status": "experimental",
+        "disclaimer": "ChronosX is in ALPHA mode for data collection and infrastructure validation. "
+                     "Risk controls are loosened 5x. Kelly sizing is inactive due to low signal confidence. "
+                     "This is NOT optimized for profitability—it validates governance architecture.",
+        "risk_multiplier": "5x normal thresholds",
+        "kelly_status": "inactive (confidence < threshold)",
+        "governance": "MPC bypassed for throughput",
+        "purpose": "Infrastructure validation, not profit maximization"
+    }
+
+
 @app.get("/")
 async def root() -> Dict[str, Any]:
     """API root endpoint with documentation."""
