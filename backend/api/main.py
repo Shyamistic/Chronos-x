@@ -364,6 +364,16 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
+@app.get("/system/mode")
+def system_mode():
+    return {
+        "mode": "ALPHA",
+        "exits_enabled": False,
+        "profit_reporting": "realized_only",
+        "reason": "Governance validation before profit optimization"
+    }
+
+
 @app.get("/system/alpha-disclaimer")
 async def get_alpha_disclaimer():
     """

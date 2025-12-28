@@ -45,6 +45,15 @@ CREATE TABLE IF NOT EXISTS system_events (
     metadata JSONB
 );
 
+-- Positions table (placeholder - no logic)
+CREATE TABLE IF NOT EXISTS positions (
+    symbol TEXT PRIMARY KEY,
+    size REAL,
+    avg_entry REAL,
+    unrealized_pnl REAL,
+    updated_at TIMESTAMP
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);

@@ -65,7 +65,7 @@ class TradeRepository:
                         SELECT 
                             timestamp, order_id, symbol, side, size,
                             entry_price, exit_price, pnl, slippage,
-                            execution_latency_ms, status
+                            execution_latency_ms, status, governance_approval
                         FROM trades
                         ORDER BY timestamp DESC
                         LIMIT :limit
@@ -75,6 +75,14 @@ class TradeRepository:
                 
                 trades = []
                 for row in result:
+                    # Parse governance trace if available
+                    governance_trace = None
+                    if hasattr(row, 'governance_approval') and row.governance_approval:
+                        try:
+                            governance_trace = json.loads(row.governance_approval) if isinstance(row.governance_approval, str) else row.governance_approval
+                        except:
+                            governance_trace = None
+                    
                     trades.append({
                         "timestamp": row.timestamp.isoformat() if row.timestamp else None,
                         "order_id": row.order_id,
@@ -87,6 +95,7 @@ class TradeRepository:
                         "slippage": float(row.slippage) if row.slippage else None,
                         "execution_latency_ms": int(row.execution_latency_ms) if row.execution_latency_ms else None,
                         "status": row.status,
+                        "governance_trace": governance_trace,
                     })
                 
                 return trades
