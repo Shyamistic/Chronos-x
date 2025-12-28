@@ -646,6 +646,15 @@ footer {
             </div>
           </div>
         </div>
+        
+        <!-- WEEX API Test -->
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
+          <div style="font-size: 10px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.06em; text-transform: uppercase;">WEEX Compliance</div>
+          <button onclick="testWeexAPI()" style="width: 100%; padding: 6px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); border-radius: 4px; color: var(--warn); font-size: 10px; cursor: pointer;">
+            Test WEEX API (For Compliance)
+          </button>
+          <div id="api-test-result" style="font-size: 9px; color: var(--muted); margin-top: 4px; text-align: center;"></div>
+        </div>
       </div>
     </section>
 
@@ -858,6 +867,37 @@ async function refresh() {
     });
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function testWeexAPI() {
+  const resultEl = document.getElementById('api-test-result');
+  resultEl.textContent = 'Testing WEEX API...';
+  resultEl.style.color = 'var(--warn)';
+  
+  try {
+    const response = await fetch(API_BASE + '/weex/api-test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.result?.status === 'success') {
+      resultEl.textContent = '✅ WEEX API test successful';
+      resultEl.style.color = 'var(--good)';
+      console.log('WEEX API test result:', result);
+    } else {
+      resultEl.textContent = '❌ WEEX API test failed';
+      resultEl.style.color = 'var(--bad)';
+      console.error('WEEX API test failed:', result);
+    }
+  } catch (error) {
+    resultEl.textContent = '❌ Connection error';
+    resultEl.style.color = 'var(--bad)';
+    console.error('WEEX API test error:', error);
   }
 }
 

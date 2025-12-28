@@ -197,3 +197,37 @@ class WeexClient:
             json_body=payload,
             auth=True,
         )
+
+    def get_account_balance(self) -> Dict[str, Any]:
+        """
+        Get account balance - safe API test method.
+        This is the safest way to test WEEX API authentication.
+        """
+        return self._request(
+            "GET",
+            "/capi/v2/account/balance",
+            auth=True,
+        )
+
+    def api_test(self) -> Dict[str, Any]:
+        """
+        WEEX API compliance test - fetches account balance to prove authentication.
+        This is what WEEX needs to see to mark API testing as "passed".
+        """
+        try:
+            print("[WeexClient] Starting WEEX API compliance test...")
+            balance_response = self.get_account_balance()
+            print(f"[WeexClient] ✅ WEEX API test successful: {balance_response}")
+            return {
+                "status": "success",
+                "test_type": "account_balance_fetch",
+                "response": balance_response,
+                "timestamp": time.time()
+            }
+        except Exception as e:
+            print(f"[WeexClient] ❌ WEEX API test failed: {e}")
+            return {
+                "status": "failed",
+                "error": str(e),
+                "timestamp": time.time()
+            }
