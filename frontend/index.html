@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ChronosX — Autonomous Trading Governance</title>
+
+<style>
+:root {
+  --bg: #020617;
+  --bg-elevated: #020617;
+  --panel: #020617;
+  --panel-soft: #020617;
+  --border: #1e293b;
+  --border-soft: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #22d3ee;
+  --accent-soft: rgba(34,211,238,0.15);
+  --good: #22c55e;
+  --bad: #ef4444;
+  --warn: #f59e0b;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 10px;
+  --radius-soft: 999px;
+  --shadow-soft: 0 10px 40px rgba(15,23,42,0.75);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(56,189,248,0.18) 0, transparent 55%),
+    radial-gradient(circle at bottom right, rgba(59,130,246,0.18) 0, transparent 60%),
+    #020617;
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Inter", sans-serif;
+}
+
+/* HEADER */
+
+.app-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 16px 20px;
+}
+
+header {
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(148,163,184,0.25);
+  background: radial-gradient(circle at top right, rgba(34,211,238,0.18), transparent 55%),
+              radial-gradient(circle at bottom left, rgba(59,130,246,0.18), transparent 60%),
+              rgba(15,23,42,0.96);
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background:
+    conic-gradient(from 210deg, #22d3ee, #4f46e5, #22c55e, #22d3ee);
+  padding: 1px;
+}
+
+.brand-mark-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  background: radial-gradient(circle at 30% 0, rgba(248,250,252,0.18), transparent 50%),
+              #020617;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+
+h1 {
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+  color: #e5e7eb;
+}
+
+header small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chip {
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: var(--radius-soft);
+  font-family: var(--mono);
+  border: 1px solid rgba(148,163,184,0.4);
+  color: var(--muted);
+  background: rgba(15,23,42,0.8);
+}
+
+.badge {
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: var(--radius-soft);
+  font-family: var(--mono);
+  border: 1px solid var(--border);
+}
+
+.badge.alpha {
+  color: var(--warn);
+  border-color: rgba(245,158,11,0.6);
+  background: rgba(245,158,11,0.09);
+}
+
+/* MAIN GRID */
+
+.main {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1.2fr) minmax(0, 340px);
+  gap: 14px;
+}
+
+/* PANELS */
+
+.panel {
+  background: linear-gradient(135deg, rgba(15,23,42,0.98), rgba(15,23,42,0.94));
+  border-radius: var(--radius);
+  border: 1px solid rgba(30,64,175,0.28);
+  box-shadow: 0 18px 40px rgba(15,23,42,0.8);
+  padding: 14px 14px 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  opacity: 0.06;
+  background:
+    radial-gradient(circle at top left, rgba(56,189,248,1), transparent 55%),
+    radial-gradient(circle at bottom right, rgba(34,197,94,1), transparent 55%);
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.panel-inner {
+  position: relative;
+  z-index: 1;
+}
+
+.panel h2 {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel h2 span {
+  font-weight: 500;
+}
+
+.pill {
+  font-size: 10px;
+  border-radius: var(--radius-soft);
+  border: 1px solid rgba(148,163,184,0.45);
+  padding: 2px 8px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+/* SYSTEM STATUS */
+
+.kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.kv-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  box-shadow: 0 0 0 1px rgba(15,23,42,0.7);
+}
+
+.value {
+  font-size: 11px;
+  color: #e5e7eb;
+}
+
+.value.good {
+  color: var(--good);
+}
+
+.value.bad {
+  color: var(--bad);
+}
+
+.value.warn {
+  color: var(--warn);
+}
+
+.value.soft {
+  color: var(--muted);
+}
+
+/* METRICS */
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: radial-gradient(circle at top, rgba(15,23,42,1), rgba(15,23,42,0.96));
+  padding: 7px 9px 8px;
+}
+
+.metric-label {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.metric-value {
+  font-family: var(--mono);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.metric-sub {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* GOVERNANCE */
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rule-label {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rule-value {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* TRADES TABLE */
+
+.trades-panel {
+  margin-top: 14px;
+  grid-column: 1 / -1;
+}
+
+.table-wrap {
+  margin-top: 6px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: radial-gradient(circle at top, rgba(15,23,42,0.98), rgba(15,23,42,0.96));
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+thead {
+  background: rgba(15,23,42,0.98);
+}
+
+th,
+td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(30,41,59,0.85);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+tbody tr:nth-child(even) {
+  background: rgba(15,23,42,0.96);
+}
+
+tbody tr:hover {
+  background: rgba(30,64,175,0.34);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  border: 1px solid rgba(148,163,184,0.5);
+}
+
+.status-pill.good {
+  color: var(--good);
+  border-color: rgba(34,197,94,0.7);
+  background: rgba(22,163,74,0.15);
+}
+
+.status-pill.bad {
+  color: var(--bad);
+  border-color: rgba(239,68,68,0.7);
+  background: rgba(127,29,29,0.2);
+}
+
+.status-pill.warn {
+  color: var(--warn);
+  border-color: rgba(245,158,11,0.7);
+  background: rgba(146,64,14,0.2);
+}
+
+.side-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  border: 1px solid rgba(148,163,184,0.45);
+}
+
+.side-badge.buy {
+  color: var(--good);
+  border-color: rgba(34,197,94,0.7);
+  background: rgba(22,163,74,0.15);
+}
+
+.side-badge.sell {
+  color: var(--bad);
+  border-color: rgba(239,68,68,0.7);
+  background: rgba(127,29,29,0.2);
+}
+
+/* FOOTER */
+
+footer {
+  margin-top: 14px;
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  padding: 10px 4px 0;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 1024px) {
+  .main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    padding: 12px 10px 16px;
+  }
+
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-right {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .trades-panel {
+    margin-top: 12px;
+  }
+}
+</style>
+</head>
+
+<body>
+<div class="app-shell">
+
+  <header>
+    <div class="header-left">
+      <div class="brand-mark">
+        <div class="brand-mark-inner">CX</div>
+      </div>
+      <div>
+        <h1>ChronosX · Autonomous Governance</h1>
+        <small>Real execution telemetry · Non‑simulated fill stream</small>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="chip">
+        <span id="clock">—</span>
+      </div>
+      <div class="badge alpha">ALPHA · GOVERNANCE VALIDATION</div>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- SYSTEM -->
+    <section class="panel">
+      <div class="panel-inner">
+        <h2>
+          <span>System Status</span>
+          <span class="pill" id="env-label">LIVE · MPC</span>
+        </h2>
+        <div class="kv-list">
+          <div class="kv">
+            <span class="kv-label">
+              <span class="dot" id="dot-status"></span>
+              <span>Status</span>
+            </span>
+            <span id="sys-status" class="value soft">—</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">
+              <span class="dot" id="dot-trading"></span>
+              <span>Trading</span>
+            </span>
+            <span id="trade-status" class="value soft">—</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">Active Symbols</span>
+            <span id="symbols" class="value soft">—</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">Uptime</span>
+            <span id="uptime" class="value soft">—</span>
+          </div>
+          <div class="kv">
+            <span class="kv-label">
+              <span class="dot" id="dot-db"></span>
+              <span>Database</span>
+            </span>
+            <span id="db" class="value soft">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- METRICS -->
+    <section class="panel">
+      <div class="panel-inner">
+        <h2>
+          <span>Performance</span>
+          <span class="pill">Real executions · 24h</span>
+        </h2>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Total PnL</div>
+            <div class="metric-value" id="pnl">—</div>
+            <div class="metric-sub" id="pnl-sub">Net across all symbols</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Win rate</div>
+            <div class="metric-value" id="winrate">—</div>
+            <div class="metric-sub">Closed trades only</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Sharpe</div>
+            <div class="metric-value" id="sharpe">—</div>
+            <div class="metric-sub">Risk‑adjusted return</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Max drawdown</div>
+            <div class="metric-value" id="dd">—</div>
+            <div class="metric-sub">Peak‑to‑trough</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GOVERNANCE -->
+    <section class="panel">
+      <div class="panel-inner">
+        <h2>
+          <span>Governance Rules</span>
+          <span class="pill">Autonomous controls</span>
+        </h2>
+        <div class="rules-grid">
+          <div class="rule">
+            <span class="rule-label">MPC Threshold</span>
+            <span id="mpc" class="rule-value">—</span>
+          </div>
+          <div class="rule">
+            <span class="rule-label">Force execute</span>
+            <span id="force" class="rule-value">—</span>
+          </div>
+          <div class="rule">
+            <span class="rule-label">Min confidence</span>
+            <span id="conf" class="rule-value">—</span>
+          </div>
+          <div class="rule">
+            <span class="rule-label">Max position</span>
+            <span id="pos" class="rule-value">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRADES -->
+    <section class="panel trades-panel">
+      <div class="panel-inner">
+        <h2>
+          <span>Execution Ledger</span>
+          <span class="pill">Auditable · Latest 10 fills</span>
+        </h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Size</th>
+                <th>Price</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="trades"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    ChronosX is an ALPHA infrastructure and governance validation system. Risk controls may be relaxed; this console renders real executions only.
+  </footer>
+
+</div>
+
+<script>
+const API = "http://100.30.247.108:8000";
+
+async function fetchJSON(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(path + " " + r.status);
+  return r.json();
+}
+
+function fmtPct(x) {
+  if (x === null || x === undefined || isNaN(x)) return "—";
+  return (x * 100).toFixed(2) + "%";
+}
+
+function fmtUSD(x) {
+  if (x === null || x === undefined || isNaN(x)) return "—";
+  const v = Number(x);
+  const sign = v < 0 ? "-" : "";
+  return sign + "$" + Math.abs(v).toFixed(2);
+}
+
+function setDot(elId, state) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.style.background =
+    state === "good" ? "#22c55e" :
+    state === "bad" ? "#ef4444" :
+    state === "warn" ? "#f59e0b" :
+    "#1f2937";
+  el.style.boxShadow =
+    state === "good"
+      ? "0 0 0 4px rgba(34,197,94,0.22)"
+      : state === "bad"
+      ? "0 0 0 4px rgba(239,68,68,0.22)"
+      : state === "warn"
+      ? "0 0 0 4px rgba(245,158,11,0.22)"
+      : "0 0 0 1px rgba(15,23,42,0.7)";
+}
+
+function classifyStatus(health) {
+  if (!health) return { sys: "warn", trading: "warn", db: "warn" };
+  const dbState = health.database_connected ? "good" : "bad";
+  const tradingState = health.trading_enabled ? "good" : "bad";
+  const sysState =
+    health.status && health.status.toLowerCase() === "ok"
+      ? "good"
+      : health.status && health.status.toLowerCase() === "degraded"
+      ? "warn"
+      : "bad";
+  return { sys: sysState, trading: tradingState, db: dbState };
+}
+
+function classifyPnL(pnl) {
+  if (pnl === null || pnl === undefined || isNaN(pnl)) return "soft";
+  if (pnl > 0) return "good";
+  if (pnl < 0) return "bad";
+  return "soft";
+}
+
+function classifyDrawdown(dd) {
+  if (dd === null || dd === undefined || isNaN(dd)) return "soft";
+  if (dd > 0.25) return "bad";
+  if (dd > 0.10) return "warn";
+  return "good";
+}
+
+async function refresh() {
+  try {
+    const [health, gov, metrics, trades] = await Promise.all([
+      fetchJSON("/system/health"),
+      fetchJSON("/governance/rules"),
+      fetchJSON("/analytics/metrics"),
+      fetchJSON("/analytics/trades?limit=10")
+    ]);
+
+    // System
+    const statusClasses = classifyStatus(health);
+    setDot("dot-status", statusClasses.sys);
+    setDot("dot-trading", statusClasses.trading);
+    setDot("dot-db", statusClasses.db);
+
+    const sysStatusEl = document.getElementById("sys-status");
+    sysStatusEl.textContent = health.status || "UNKNOWN";
+    sysStatusEl.className = "value " + statusClasses.sys;
+
+    const tradeStatusEl = document.getElementById("trade-status");
+    tradeStatusEl.textContent = health.trading_enabled ? "ACTIVE" : "HALTED";
+    tradeStatusEl.className =
+      "value " + (health.trading_enabled ? "good" : "bad");
+
+    document.getElementById("symbols").textContent =
+      (health.symbols_active || []).join(", ") || "—";
+
+    document.getElementById("uptime").textContent =
+      (health.uptime_seconds || 0) + "s";
+
+    const dbEl = document.getElementById("db");
+    dbEl.textContent = health.database_connected ? "CONNECTED" : "DOWN";
+    dbEl.className =
+      "value " + (health.database_connected ? "good" : "bad");
+
+    // Metrics
+    const pnlEl = document.getElementById("pnl");
+    pnlEl.textContent = fmtUSD(metrics.total_pnl);
+    pnlEl.className = "metric-value " + classifyPnL(metrics.total_pnl);
+
+    const winEl = document.getElementById("winrate");
+    winEl.textContent = fmtPct(metrics.win_rate);
+
+    const sharpeEl = document.getElementById("sharpe");
+    sharpeEl.textContent =
+      metrics.sharpe_ratio !== undefined && metrics.sharpe_ratio !== null
+        ? metrics.sharpe_ratio.toFixed(2)
+        : "—";
+
+    const ddEl = document.getElementById("dd");
+    ddEl.textContent = fmtPct(metrics.max_drawdown);
+    ddEl.className =
+      "metric-value " + classifyDrawdown(metrics.max_drawdown);
+
+    // Governance
+    document.getElementById("mpc").textContent =
+      gov.mpc_threshold != null ? gov.mpc_threshold : "—";
+
+    const forceEl = document.getElementById("force");
+    forceEl.textContent = gov.force_execute_mode ? "ENABLED" : "DISABLED";
+    forceEl.className =
+      "rule-value " + (gov.force_execute_mode ? "warn" : "soft");
+
+    document.getElementById("conf").textContent = fmtPct(gov.min_confidence);
+    document.getElementById("pos").textContent =
+      gov.max_position_size != null ? gov.max_position_size : "—";
+
+    // Trades
+    const tb = document.getElementById("trades");
+    tb.innerHTML = "";
+    (trades.trades || []).forEach((t) => {
+      const sideClass =
+        t.side && t.side.toUpperCase() === "BUY" ? "buy" : "sell";
+      const status =
+        (t.status || "").toUpperCase() === "FILLED"
+          ? "FILLED"
+          : t.status || "—";
+      const statusClass =
+        status === "FILLED"
+          ? "good"
+          : status === "REJECTED"
+          ? "bad"
+          : "warn";
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${new Date(t.timestamp).toLocaleTimeString()}</td>
+        <td>${t.symbol || "—"}</td>
+        <td><span class="side-badge ${sideClass}">${t.side || "—"}</span></td>
+        <td>${t.size != null ? t.size : "—"}</td>
+        <td>${t.entry_price != null ? t.entry_price : "—"}</td>
+        <td><span class="status-pill ${statusClass}">${status}</span></td>
+      `;
+      tb.appendChild(row);
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function tickClock() {
+  const el = document.getElementById("clock");
+  if (!el) return;
+  const now = new Date();
+  el.textContent = now.toLocaleTimeString();
+}
+
+refresh();
+setInterval(refresh, 5000);
+tickClock();
+setInterval(tickClock, 1000);
+</script>
+</body>
+</html>
+
