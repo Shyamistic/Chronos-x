@@ -209,6 +209,18 @@ class WeexClient:
             auth=True,
         )
 
+    def upload_ai_log(self, ai_log_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Upload AI decision log to WEEX for compliance.
+        This is required for WEEX AI Wars competition.
+        """
+        return self._request(
+            "POST",
+            "/capi/v2/order/uploadAiLog",
+            json_body=ai_log_data,
+            auth=True,
+        )
+
     def api_test(self) -> Dict[str, Any]:
         """
         WEEX API compliance test - tries multiple endpoints to find working one.

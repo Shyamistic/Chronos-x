@@ -650,8 +650,11 @@ footer {
         <!-- WEEX API Test -->
         <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
           <div style="font-size: 10px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.06em; text-transform: uppercase;">WEEX Compliance</div>
-          <button onclick="testWeexAPI()" style="width: 100%; padding: 6px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); border-radius: 4px; color: var(--warn); font-size: 10px; cursor: pointer;">
+          <button onclick="testWeexAPI()" style="width: 100%; padding: 6px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); border-radius: 4px; color: var(--warn); font-size: 10px; cursor: pointer; margin-bottom: 4px;">
             Test WEEX API (For Compliance)
+          </button>
+          <button onclick="uploadAILog()" style="width: 100%; padding: 6px; background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.4); border-radius: 4px; color: var(--good); font-size: 10px; cursor: pointer;">
+            Upload AI Log (AI Wars)
           </button>
           <div id="api-test-result" style="font-size: 9px; color: var(--muted); margin-top: 4px; text-align: center;"></div>
         </div>
@@ -898,6 +901,37 @@ async function testWeexAPI() {
     resultEl.textContent = '❌ Connection error';
     resultEl.style.color = 'var(--bad)';
     console.error('WEEX API test error:', error);
+  }
+}
+
+async function uploadAILog() {
+  const resultEl = document.getElementById('api-test-result');
+  resultEl.textContent = 'Uploading AI log to WEEX...';
+  resultEl.style.color = 'var(--warn)';
+  
+  try {
+    const response = await fetch(API_BASE + '/weex/upload-ai-log', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok && result.status === 'success') {
+      resultEl.textContent = `✅ AI log uploaded (Order: ${result.order_id})`;
+      resultEl.style.color = 'var(--good)';
+      console.log('AI log upload result:', result);
+    } else {
+      resultEl.textContent = '❌ AI log upload failed';
+      resultEl.style.color = 'var(--bad)';
+      console.error('AI log upload failed:', result);
+    }
+  } catch (error) {
+    resultEl.textContent = '❌ Upload connection error';
+    resultEl.style.color = 'var(--bad)';
+    console.error('AI log upload error:', error);
   }
 }
 

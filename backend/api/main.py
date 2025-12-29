@@ -374,6 +374,50 @@ def system_mode():
     }
 
 
+@app.post("/weex/upload-ai-log")
+async def upload_ai_log():
+    """
+    Upload AI decision log to WEEX for AI Wars compliance.
+    Uses the ai_log.json file in the project root.
+    """
+    import json
+    import os
+    from backend.trading.weex_client import WeexClient
+    
+    try:
+        # Load AI log from file
+        ai_log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "ai_log.json")
+        
+        if not os.path.exists(ai_log_path):
+            return {
+                "status": "failed",
+                "error": "ai_log.json not found",
+                "path_checked": ai_log_path
+            }
+        
+        with open(ai_log_path, 'r') as f:
+            ai_log_data = json.load(f)
+        
+        # Upload to WEEX
+        client = WeexClient()
+        result = client.upload_ai_log(ai_log_data)
+        
+        return {
+            "status": "success",
+            "ai_log_uploaded": True,
+            "order_id": ai_log_data.get("orderId"),
+            "weex_response": result,
+            "message": "AI decision log uploaded to WEEX for compliance verification"
+        }
+    
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": str(e),
+            "message": "Failed to upload AI log to WEEX"
+        }
+
+
 @app.post("/weex/api-test")
 async def weex_api_test():
     """
