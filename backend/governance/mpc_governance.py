@@ -1,37 +1,5 @@
 # backend/governance/mpc_governance.py
 """
-Multi-Party Computation (MPC) governance for trade approval.
-Implements 2-of-3 threshold signature scheme for secure trade authorization.
-"""
-
-import hashlib
-import hmac
-import uuid
-from typing import Dict, List, Any, Optional
-from datetime import datetime
-
-
-class MPCGovernance:
-    """
-    MPC-based governance: 2-of-3 nodes must approve trades.
-    
-    Prevents rogue orders even if one node is compromised.
-    Uses HMAC-SHA256 signatures for per-node approval.
-    """
-    
-    def __init__(self, num_nodes: int = 3, threshold: int = 2):
-        """
-        Initialize MPC governance.
-        
-        Args:
-            num_nodes: Total number of governance nodes (default: 3)
-            threshold: Minimum approvals required (default: 2 of 3)
-        """
-        self.num_nodes = num_nodes
-        self.threshold = threshold
-        
-        # Generate unique keys for # backend/governance/mpc_governance.py
-"""
 MPC-backed governance for trade approval.
 2-of-3 node approval prevents rogue trading.
 """

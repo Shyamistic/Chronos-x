@@ -219,8 +219,8 @@ class PaperTrader:
                 closes = [c.close for c in self.momentum_agent.history[-20:]]
                 sma20 = sum(closes) / len(closes)
                 trend_dir = 1 if candle.close > sma20 else -1
-                from backend.agents.signal_agents import AgentSignal
-                trend_sig = AgentSignal(
+                from backend.agents.signal_agents import TradingSignal
+                trend_sig = TradingSignal(
                     agent_id="trend_fallback",
                     direction=trend_dir,
                     confidence=0.12,

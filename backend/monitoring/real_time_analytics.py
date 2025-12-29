@@ -67,7 +67,7 @@ class RealTimePerformanceMonitor:
             except Exception as e:
                 logger.error(f"❌ Failed to persist trade to database: {e}")
     
-    def calculate_metrics(self) -> Dict:
+    def calculate_metrics(self, trades_override: Optional[List[Dict]] = None) -> Dict:
         """
         Calculate all performance metrics from recorded trades.
         
@@ -75,7 +75,9 @@ class RealTimePerformanceMonitor:
             Dict with keys: total_pnl, num_trades, win_rate, sharpe_ratio,
             max_drawdown, profit_factor, recovery_factor, etc.
         """
-        if not self.trades:
+        trades_to_use = trades_override if trades_override is not None else self.trades
+        
+        if not trades_to_use:
             return {
                 "total_pnl": 0.0,
                 "num_trades": 0,
@@ -91,7 +93,7 @@ class RealTimePerformanceMonitor:
         
         # Extract returns
         returns = []
-        for t in self.trades:
+        for t in trades_to_use:
             pnl = t.get("pnl", 0)
             notional = t.get("entry_price", 1) * t.get("size", 1)
             if notional > 0:
@@ -106,11 +108,11 @@ class RealTimePerformanceMonitor:
         # --- Core Metrics ---
         
         # Total P&L
-        total_pnl = sum(t.get("pnl", 0) for t in self.trades)
+        total_pnl = sum(t.get("pnl", 0) for t in trades_to_use)
         
         # Win Rate
-        wins = sum(1 for t in self.trades if t.get("pnl", 0) > 0)
-        num_trades = len(self.trades)
+        wins = sum(1 for t in trades_to_use if t.get("pnl", 0) > 0)
+        num_trades = len(trades_to_use)
         win_rate = wins / num_trades if num_trades > 0 else 0.0
         
         # Sharpe Ratio (annualized)
@@ -125,19 +127,19 @@ class RealTimePerformanceMonitor:
         max_dd = float(np.min(drawdown)) if len(drawdown) > 0 else 0.0
         
         # Profit Factor
-        gross_profit = sum(t.get("pnl", 0) for t in self.trades if t.get("pnl", 0) > 0)
-        gross_loss = abs(sum(t.get("pnl", 0) for t in self.trades if t.get("pnl", 0) < 0))
+        gross_profit = sum(t.get("pnl", 0) for t in trades_to_use if t.get("pnl", 0) > 0)
+        gross_loss = abs(sum(t.get("pnl", 0) for t in trades_to_use if t.get("pnl", 0) < 0))
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
         
         # Recovery Factor
         recovery_factor = abs(total_pnl / max_dd) if max_dd < 0 else 0.0
         
         # Average Trade Size
-        avg_trade_size = np.mean([t.get("size", 0) for t in self.trades])
+        avg_trade_size = np.mean([t.get("size", 0) for t in trades_to_use])
         
         # Consecutive wins/losses
-        consecutive_wins = self._count_consecutive(lambda t: t.get("pnl", 0) > 0)
-        consecutive_losses = self._count_consecutive(lambda t: t.get("pnl", 0) < 0)
+        consecutive_wins = self._count_consecutive(lambda t: t.get("pnl", 0) > 0, trades_to_use)
+        consecutive_losses = self._count_consecutive(lambda t: t.get("pnl", 0) < 0, trades_to_use)
         
         return {
             "total_pnl": float(total_pnl),
@@ -154,15 +156,16 @@ class RealTimePerformanceMonitor:
             "gross_loss": float(gross_loss),
         }
     
-    def _count_consecutive(self, condition_fn) -> int:
+    def _count_consecutive(self, condition_fn, trades_list: Optional[List[Dict]] = None) -> int:
         """Count maximum consecutive trades matching condition."""
-        if not self.trades:
+        trades_to_check = trades_list if trades_list is not None else self.trades
+        if not trades_to_check:
             return 0
         
         max_streak = 0
         current_streak = 0
         
-        for trade in self.trades:
+        for trade in trades_to_check:
             if condition_fn(trade):
                 current_streak += 1
                 max_streak = max(max_streak, current_streak)

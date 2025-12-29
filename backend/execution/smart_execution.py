@@ -63,10 +63,10 @@ class SmartExecutionEngine:
         # Expected fill and slippage
         if side.lower() == "buy":
             expected_fill = ask
-            slippage = (expected_fill - entry_price) / entry_price
+            slippage = (expected_fill - entry_price) / (entry_price + 1e-8)
         else:
             expected_fill = bid
-            slippage = (entry_price - expected_fill) / entry_price
+            slippage = (entry_price - expected_fill) / (entry_price + 1e-8)
 
         # Gate 1: slippage
         if abs(slippage) > self.max_slippage_pct:
