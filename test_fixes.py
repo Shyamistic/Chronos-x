@@ -27,6 +27,13 @@ def test_imports():
 def test_basic_functionality():
     """Test basic object creation and method calls."""
     try:
+        from backend.trading.weex_client import WeexClient
+        from backend.trading.paper_trader import PaperTrader
+        from backend.agents.signal_agents import SentimentAgent
+        from backend.risk.kelly_criterion import KellyCriterionSizer
+        from backend.governance.mpc_governance import MPCGovernance
+        from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
+        
         # Test WeexClient
         client = WeexClient()
         
