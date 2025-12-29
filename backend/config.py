@@ -12,7 +12,7 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.05  # Allow low-confidence trades for data collection
+    MIN_CONFIDENCE = 0.25  # Raise to 25% for stronger signals
     MAX_POSITION_SIZE = 0.01  # BTC (conservative)
     KELLY_FRACTION = 0.25  # Fractional Kelly (1/4)
     

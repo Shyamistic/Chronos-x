@@ -462,7 +462,7 @@ class SentimentAgent:
         if abs(self.last_score) < threshold:
             # Micro-move: emit weak directional signal
             direction = 1 if self.last_score >= 0 else -1
-            confidence = 0.22  # above governance minimum (20%)
+            confidence = 0.35  # Competitive confidence level
             return TradingSignal(
                 agent_id=self.agent_id,
                 direction=direction,
@@ -472,7 +472,7 @@ class SentimentAgent:
 
         # Meaningful move (>= 0.01%)
         direction = 1 if self.last_score > 0 else -1
-        confidence = min(0.9, max(0.22, abs(self.last_score) * 100))  # 0.22–0.9 range
+        confidence = min(0.65, max(0.35, abs(self.last_score) * 150))  # 35-65% range for competition
 
         return TradingSignal(
             agent_id=self.agent_id,
