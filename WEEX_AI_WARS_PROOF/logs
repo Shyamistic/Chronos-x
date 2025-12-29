@@ -1,0 +1,53 @@
+C:\Users\shyam.BATCONSOLE\Desktop\chronosx-weex>curl -X POST http://100.30.247.108:8000/weex/upload-ai-log
+{"status":"success","ai_log_uploaded":true,"order_id":699688288641876861,"weex_response":{"code":"00000","msg":"success","requestTime":1767009242467,"data":"upload success"},"message":"AI decision log uploaded to WEEX for compliance verification"}
+
+
+(venv) root@ip-172-31-3-66:~/chronosx# uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
+INFO:     Started server process [9970]
+INFO:     Waiting for application startup.
+[MPCGovernance] Initialized: 3 nodes, 2-of-3 threshold
+
+================================================================================
+[WeexTradingLoop] TRADING CONFIGURATION
+================================================================================
+Account Equity:         $50,000
+Circuit Breaker:        6-layer enabled
+Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
+================================================================================
+
+
+ChronosX Trading Config
+======================
+Mode: ALPHA (force_execute=true)
+Min Confidence: 0.25
+Max Position: 0.01 BTC
+Kelly Fraction: 0.25
+Max Daily Loss: -10.0%
+Max Weekly Loss: -25.0%
+Trade in Choppy: DISABLED
+
+
+================================================================================
+ChronosX Trading API - STARTUP
+================================================================================
+Mode: ALPHA (force_execute=true)
+Monitor: ✅ Initialized (database persistence enabled)
+Trading Loop: ✅ Ready
+API: ✅ Listening on :8000
+================================================================================
+
+
+ChronosX Trading Config
+======================
+Mode: ALPHA (force_execute=true)
+Min Confidence: 0.25
+Max Position: 0.01 BTC
+Kelly Fraction: 0.25
+Max Daily Loss: -10.0%
+Max Weekly Loss: -25.0%
+Trade in Choppy: DISABLED
+
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+[WeexClient] REQUEST POST /capi/v2/order/uploadAiLog qs= body={"explanation":"ChronosX evaluated short-term market sentiment, volatility regime, and liquidity conditions. The ensemble produced a bullish signal with moderate confidence. Risk governance approved the trade after verifying Kelly sizing limits, leverage constraints, and circuit breaker conditions. A conservative position was executed to validate the AI signalunder live market conditions.","input":{"features":{"last_close":87421.4,"liquidity_24h_usdt":4444445235,"sentiment_confidence":0.294,"sentiment_score":0.4,"volatility_regime":"neutral"},"market":"BTC/USDT","risk_constraints":{"circuit_breakers_active":false,"kelly_fraction":0.25,"max_risk_per_trade":"2%"},"timeframe":"1m"},"model":"ChronosX-Ensemble-v1","orderId":699688288641876861,"output":{"confidence":0.294,"decision":"OPEN_LONG","entry_price":87421.4,"execution_mode":"LIMIT","position_size_btc":0.0017},"stage":"Decision Making"} headers={'ACCESS-KEY': 'weex_a...', 'ACCESS-TIMESTAMP': '1767009241784'}
+INFO:     152.59.153.177:62157 - "POST /weex/upload-ai-log HTTP/1.1" 200 OK
