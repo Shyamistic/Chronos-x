@@ -695,10 +695,10 @@ footer {
 </div>
 
 <script>
-const API_BASE = 'http://100.30.247.108:8000';
+const API_BASE = "/api";
 
 async function fetchJSON(path) {
-  const r = await fetch(API_BASE + path);
+  const r = await fetch(`${API_BASE}${path}`);
   if (!r.ok) throw new Error(path + " " + r.status);
   return r.json();
 }
@@ -879,7 +879,7 @@ async function testWeexAPI() {
   resultEl.style.color = 'var(--warn)';
   
   try {
-    const response = await fetch(API_BASE + '/weex/api-test', {
+    const response = await fetch(`${API_BASE}/weex/api-test`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -910,7 +910,7 @@ async function uploadAILog() {
   resultEl.style.color = 'var(--warn)';
   
   try {
-    const response = await fetch(API_BASE + '/weex/upload-ai-log', {
+    const response = await fetch(`${API_BASE}/weex/upload-ai-log`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
