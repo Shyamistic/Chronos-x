@@ -8,12 +8,8 @@ def main() -> None:
     symbol = "cmt_btcusdt"
 
     print("=== Accounts ===")
-    accounts = client.get_accounts()
+    accounts = client.get_account_balance()
     print(accounts)
-
-    print("\n=== Contract Info ===")
-    contract_info = client.get_contract(symbol)
-    print(contract_info)
 
     print("\n=== Ticker ===")
     ticker = client.get_ticker(symbol)

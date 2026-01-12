@@ -14,6 +14,9 @@ import time
 import csv
 import io
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from backend.trading.weex_client import WeexClient
 from backend.trading.paper_trader import PaperTrader

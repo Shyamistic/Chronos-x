@@ -39,7 +39,7 @@ def test_basic_functionality():
         
         # Test PaperTrader
         trader = PaperTrader()
-        
+
         # Test signal generation
         sentiment = SentimentAgent()
         
