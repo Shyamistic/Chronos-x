@@ -541,29 +541,6 @@ class PaperTrader:
             "sharpe": float(sharpe),
             "max_drawdown": max_dd,
         }
-    def get_ensemble_signal(self):
-        """
-        Return latest ensemble signal snapshot for external consumers.
-        
-        Structure:
-        {
-            "dir": int,
-            "conf": float,
-            "regime": str,
-            "contributing_agents": List[str]
-        }
-        """
-        if self.last_ensemble_decision is None:
-            return None
-
-        return {
-            "dir": self.last_ensemble_decision.direction,
-            "conf": self.last_ensemble_decision.confidence,
-            "regime": self.last_regime.value if self.last_regime else "unknown",
-            "contributing_agents": [
-                s.agent_id for s in self.last_ensemble_decision.agent_signals
-            ],
-        }
 
     def reload_config(self, new_config: TradingConfig):
         """Reloads the configuration for the trader and its components."""

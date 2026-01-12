@@ -11,12 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+import asyncio
 
 import pandas as pd
 
-from backend.agents.signal_agents import Candle, AgentSignal, EnsembleAgent
 from backend.trading.paper_trader import PaperTrader
-from backend.governance.rule_engine import TradingSignal
 
 
 @dataclass
@@ -56,81 +55,23 @@ class Backtester:
             df = df[df["timestamp"] <= end]
         df = df.reset_index(drop=True)
 
+        # Use the actual PaperTrader to ensure backtest matches live logic
         trader = PaperTrader(initial_balance=self.initial_balance, symbol=self.symbol)
-        last_close = None
 
+        # Run the simulation asynchronously
+        loop = asyncio.get_event_loop()
         for _, row in df.iterrows():
+            # Convert row to Candle object
+            from backend.agents.signal_agents import Candle
             candle = Candle.from_row(row)
-            trader.momentum_agent.update(candle)
-            trader._update_equity(mark_price=candle.close)
-
-            # Try MomentumRSI first
-            sig = trader.momentum_agent.generate()
-
-            # If no signal or zero direction, force a simple price-following demo signal
-            if sig is None or sig.direction == 0:
-                if last_close is None:
-                    direction = 1
-                else:
-                    direction = 1 if candle.close >= last_close else -1
-                sig = AgentSignal(
-                    agent_id="demo_forced",
-                    direction=direction,
-                    confidence=0.8,
-                    metadata={"forced": True},
-                )
-            last_close = candle.close
-
-            ensemble = EnsembleAgent()
-            decision = ensemble.combine([sig])
-            if decision.direction == 0 or decision.confidence <= 0:
-                continue
-
-            side = "buy" if decision.direction > 0 else "sell"
-
-            risk_pct = 0.0025
-            risk_amount = trader.equity * risk_pct
-            stop_loss_distance = candle.close * 0.005
-            size = risk_amount / stop_loss_distance
-
-            signal = TradingSignal(
-                symbol=self.symbol,
-                side=side,
-                size=size,
-                confidence=decision.confidence,
-                stop_loss=-stop_loss_distance if side == "buy" else stop_loss_distance,
-                take_profit=stop_loss_distance * 2,
-                timestamp=candle.timestamp,
-                agent_id=sig.agent_id,
-            )
-
-            account_state = trader._get_account_state()
-            decision_gov = trader.governance.evaluate(signal, account_state)
-
-            if not decision_gov.allow or decision_gov.adjusted_size <= 0:
-                continue
-
-            final_size = decision_gov.adjusted_size
-
-            if trader.open_position:
-                trader._close_position(
-                    exit_price=candle.close, timestamp=candle.timestamp
-                )
-
-            trader._open_position(
-                side=side,
-                size=final_size,
-                price=candle.close,
-                timestamp=candle.timestamp,
-                governance_reason=decision_gov.reason,
-                risk_score=decision_gov.risk_score,
-            )
+            # Process each candle using the exact same logic as the live trader
+            loop.run_until_complete(trader.process_candle(candle))
 
         if trader.open_position:
             last_row = df.iloc[-1]
             trader._close_position(
                 exit_price=float(last_row["close"]),
-                timestamp=last_row["timestamp"],
+                timestamp=pd.to_datetime(last_row["timestamp"]),
             )
 
         metrics = trader.get_summary_metrics()
