@@ -8,6 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 

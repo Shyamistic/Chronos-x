@@ -125,7 +125,7 @@ This document tracks the technical tasks required to make ChronosX competition-r
 
 ### Fix #4: Implement Config Hot-Reload
 
-*   **Status:** ✅ **COMPLETE**
+*   **Status:** ✅ **COMPLETE** (Pending final test)
 *   **Problem:** Changing `config.py` requires a full backend restart, which is too slow for in-competition tuning.
 *   **Location:** `backend/api/main.py` (new endpoint) and `backend/governance/rule_engine.py` (new method).
 *   **Implementation Plan:**

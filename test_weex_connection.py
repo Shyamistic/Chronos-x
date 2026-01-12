@@ -17,8 +17,4 @@ if __name__ == "__main__":
     print("✅ Account balance fetched successfully.")
     print(balance)
 
-    print("\n=== TICKER ===")
-    ticker = c.get_ticker(SYMBOL)
-    print(ticker)
-
     print("\n✅ API TEST FLOW COMPLETED SUCCESSFULLY")
