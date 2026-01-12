@@ -291,30 +291,28 @@ header small {
 
 /* GOVERNANCE */
 
-.rules-grid {
+.governance-panel {
+  grid-column: span 2;
+}
+
+.metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 10px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-.rule {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.metric {
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
 }
 
-.rule-label {
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.rule-value {
+.metric .value {
+  font-size: 20px;
   font-family: var(--mono);
-  font-size: 12px;
 }
-
 /* TRADES TABLE */
 
 .trades-panel {
@@ -436,19 +434,6 @@ footer {
 
 /* RESPONSIVE */
 
-.alpha-banner {
-  margin-top: 12px;
-  padding: 8px 16px;
-  background: rgba(245,158,11,0.15);
-  border: 1px solid rgba(245,158,11,0.4);
-  border-radius: var(--radius);
-  color: var(--warn);
-  font-size: 11px;
-  font-family: var(--mono);
-  text-align: center;
-  letter-spacing: 0.05em;
-}
-
 @media (max-width: 1024px) {
   .main {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -498,14 +483,8 @@ footer {
       <div class="chip">
         <span id="clock">—</span>
       </div>
-      <div class="badge alpha">ALPHA · GOVERNANCE VALIDATION</div>
     </div>
   </header>
-
-  <!-- ALPHA MODE BANNER -->
-  <div class="alpha-banner">
-    ALPHA MODE — Governance validation only. Profit disabled by design.
-  </div>
 
   <main class="main">
 
@@ -670,7 +649,7 @@ footer {
   </main>
 
   <footer>
-    ChronosX is an ALPHA infrastructure and governance validation system. Risk controls may be relaxed; this console renders real executions only.
+    ChronosX WEEX AI Wars Edition · Live Trading System
   </footer>
 
 </div>
@@ -939,3 +918,4 @@ setInterval(tickClock, 1000);
 </script>
 </body>
 </html>
+
