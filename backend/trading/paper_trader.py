@@ -9,6 +9,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Any
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class TradeRecord:
     regime: str = "unknown"
     contributing_agents: List[str] = None
     ensemble_confidence: float = 0.0
+    order_id: Optional[str] = None
 
     def __post_init__(self):
         if self.contributing_agents is None:
@@ -383,6 +385,7 @@ class PaperTrader:
             regime=regime,
             contributing_agents=contributing_agents or [],
             ensemble_confidence=ensemble_confidence,
+            order_id=str(uuid.uuid4()),
         )
 
     def _close_position(self, exit_price: float, timestamp: datetime):
@@ -410,6 +413,7 @@ class PaperTrader:
             regime=self.open_position.regime,
             contributing_agents=self.open_position.contributing_agents,
             ensemble_confidence=self.open_position.ensemble_confidence,
+            order_id=self.open_position.order_id,
         )
 
         # NEW: hook external monitor if set (ensure dict is passed)
