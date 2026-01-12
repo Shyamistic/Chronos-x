@@ -280,7 +280,7 @@ class GovernanceEngine:
         self.rules: List[GovernanceRule] = [
             Rule01_MaxDailyLoss(self.config),
             Rule02_VolatilityCircuitBreaker(self.config),
-            Rule.Rule03_DrawdownRecovery(self.config),
+            Rule03_DrawdownRecovery(self.config),
             Rule04_LiquidityGuard(self.config),
             Rule05_RiskPerTrade(self.config),
             Rule06_LeverageLimit(self.config),

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Dict, Optional
 from typing import List, Dict, Optional, Tuple
 
 import pandas as pd
@@ -73,7 +72,6 @@ class PaperTrader:
         self.recent_pnls: List[float] = []
 
         # Governance
-        self.governance = GovernanceEngine()
         self.governance = GovernanceEngine(config=self.config)
 
         # Agents
@@ -221,8 +219,6 @@ class PaperTrader:
     async def process_candle(self, candle: Candle):
 
         """
-        Process a single candle: detect regime, update agents, decide trade,
-        apply governance, and simulate position.
         Process a single candle:
         1. Check for exits on open positions.
         2. If flat, check for new entries.
@@ -232,17 +228,13 @@ class PaperTrader:
         regime = self._detect_regime(candle)
         print(f"[PaperTrader] Candle {candle.timestamp} close={candle.close}, regime={regime.value}")
 
-        # Update agents
         # Update all agents with the new candle data
         self.momentum_agent.update(candle)
-        self.sentiment_agent.update(candle)  # <-- ADD THIS
-        self.order_flow_agent.reset_window()  # <-- AND THIS (or update with real flow data)
         self.sentiment_agent.update(candle)
         self.order_flow_agent.reset_window()  # Or update with real flow data
         self.ml_agent.update(candle)  # Also update ML agent
         self._update_equity(mark_price=candle.close)
 
-        # Generate signals from all agents
         # --- Generate Ensemble Decision (needed for both exits and entries) ---
         signals = []
         sig_momentum = self.momentum_agent.generate()
@@ -251,32 +243,19 @@ class PaperTrader:
         sig_orderflow = self.order_flow_agent.generate()
         if sig_orderflow: signals.append(sig_orderflow)
 
-        sig1 = self.momentum_agent.generate()
-        if sig1:
-            signals.append(sig1)
         sig_sentiment = self.sentiment_agent.generate()
         if sig_sentiment: signals.append(sig_sentiment)
 
-        sig3 = self.order_flow_agent.generate()
-        if sig3:
-            signals.append(sig3)
         # ML Agent signal generation (from Fix #3)
         sig_ml = self.ml_agent.generate()
         if sig_ml: signals.append(sig_ml)
 
-        sig4 = self.sentiment_agent.generate()
-        if sig4:
-            signals.append(sig4)
-
-        # ALPHA: Fallback trend signal if no directional signals
         # Fallback signal
         if not any(s.direction != 0 for s in signals):
             if len(self.momentum_agent.history) >= 20:
                 closes = [c.close for c in self.momentum_agent.history[-20:]]
                 sma20 = sum(closes) / len(closes)
                 trend_dir = 1 if candle.close > sma20 else -1
-                from backend.agents.signal_agents import TradingSignal
-                trend_sig = TradingSignal(
                 from backend.agents.signal_agents import TradingSignal as AgentTradingSignal
                 trend_sig = AgentTradingSignal(
                     agent_id="trend_fallback",
@@ -287,36 +266,15 @@ class PaperTrader:
                 signals.append(trend_sig)
                 print(f"[PaperTrader] ALPHA: Fallback trend signal dir={trend_dir}, conf=0.12")
 
-        if not signals:
-            print("[PaperTrader] No signals this candle")
-            return
-        # NEW: inspect which agents fired
-        for s in signals:
-            print(f"[PaperTrader] Signal from {s.agent_id}: dir={s.direction}, conf={s.confidence:.3f}")
-
-        print(f"[PaperTrader] {len(signals)} raw signals")
-        
-        print(f"[PaperTrader] {len(signals)} raw signals")
-
-        # Get dynamic weights from bandit
         # Get dynamic weights and combine signals
         weights = self.portfolio_manager.sample_weights_for_regime(regime)
         self.ensemble.weights = weights
-
-        # Combine signals
         ensemble_decision = self.ensemble.combine(signals)
-        print(
-            f"[PaperTrader] Ensemble decision: dir={ensemble_decision.direction}, "
-            f"conf={ensemble_decision.confidence:.3f}"
-        )
 
         # Cache for external consumers (WeexTradingLoop)
         self.last_ensemble_decision = ensemble_decision
         self.last_regime = regime
 
-        if ensemble_decision.direction == 0:
-            print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
-            return
         # --- 1. EXIT LOGIC ---
         if self.open_position:
             should_exit, exit_reason = self._should_exit(self.open_position, candle, ensemble_decision)
@@ -326,53 +284,24 @@ class PaperTrader:
                 # IMPORTANT: Return after closing to avoid immediate re-entry on the same candle
                 return
 
-        if ensemble_decision.confidence < 0.05:
-            print("[PaperTrader] Confidence too low (<0.05) -> no trade")
-            return
         # --- 2. ENTRY LOGIC (only if no open position) ---
         if not self.open_position:
             if ensemble_decision.direction == 0:
                 print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
                 return
 
-        side = "buy" if ensemble_decision.direction > 0 else "sell"
             if ensemble_decision.confidence < self.config.MIN_CONFIDENCE:
                 print(f"[PaperTrader] Confidence {ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE} -> no trade")
                 return
 
-        # Position sizing: simple risk-based (governance will further cap)
-        risk_pct = 0.0005  # 0.05% of equity per trade during testing
-        risk_amount = self.equity * risk_pct
-        stop_loss_distance = candle.close * 0.005
-        size = risk_amount / stop_loss_distance
             side = "buy" if ensemble_decision.direction > 0 else "sell"
 
-        trading_signal = TradingSignal(
-            symbol=self.symbol,
-            side=side,
-            size=size,
-            confidence=ensemble_decision.confidence,
-            stop_loss=-stop_loss_distance if side == "buy" else stop_loss_distance,
-            take_profit=stop_loss_distance * 2,
-            timestamp=candle.timestamp,
-            agent_id="ensemble",
-        )
             # Position sizing
             risk_pct = 0.0005
             risk_amount = self.equity * risk_pct
             stop_loss_distance = candle.close * 0.005
             size = risk_amount / stop_loss_distance
 
-        # Governance check
-        account_state = self._get_account_state()
-        decision: GovernanceDecision = self.governance.evaluate(
-            trading_signal, account_state
-        )
-        print(
-            f"[PaperTrader] Governance: allow={decision.allow}, "
-            f"adj_size={decision.adjusted_size:.6f}, "
-            f"risk_score={decision.risk_score:.1f}, reason={decision.reason}"
-        )
             trading_signal = TradingSignal(
                 symbol=self.symbol,
                 side=side,
@@ -384,10 +313,6 @@ class PaperTrader:
                 agent_id="ensemble",
             )
 
-        # Log governance trigger
-        self._log_governance_trigger(
-            candle.timestamp, trading_signal, decision, regime
-        )
             # Governance check
             account_state = self._get_account_state()
             decision: GovernanceDecision = self.governance.evaluate(
@@ -399,39 +324,16 @@ class PaperTrader:
                 f"risk_score={decision.risk_score:.1f}, reason={decision.reason}"
             )
 
-        if not decision.allow or decision.adjusted_size <= 0:
-            print("[PaperTrader] Trade blocked by governance or zero size")
-            return
             self._log_governance_trigger(
                 candle.timestamp, trading_signal, decision, regime
             )
 
-        final_size = decision.adjusted_size
             if not decision.allow or decision.adjusted_size <= 0:
                 print("[PaperTrader] Trade blocked by governance or zero size")
                 return
 
-        # Close open position if any
-        if self.open_position:
-            self._close_position(exit_price=candle.close, timestamp=candle.timestamp)
             final_size = decision.adjusted_size
 
-        # Open new position
-        self._open_position(
-            side=side,
-            size=final_size,
-            price=candle.close,
-            timestamp=candle.timestamp,
-            governance_reason=decision.reason,
-            risk_score=decision.risk_score,
-            regime=regime.value,
-            contributing_agents=[s.agent_id for s in ensemble_decision.agent_signals],
-            ensemble_confidence=ensemble_decision.confidence,
-        )
-        print(
-            f"[PaperTrader] Opened position side={side}, size={final_size:.6f}, "
-            f"price={candle.close}"
-        )
             # Open new position
             self._open_position(
                 side=side,
