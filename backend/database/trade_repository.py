@@ -24,11 +24,11 @@ class TradeRepository:
                         INSERT INTO trades (
                             order_id, symbol, side, size, entry_price, 
                             exit_price, pnl, slippage, execution_latency_ms,
-                            agent_signals, governance_approval, status
+                            agent_signals, governance_approval, status, timestamp
                         ) VALUES (
                             :order_id, :symbol, :side, :size, :entry_price,
                             :exit_price, :pnl, :slippage, :latency,
-                            :signals::jsonb, :governance::jsonb, :status
+                            CAST(:signals AS jsonb), CAST(:governance AS jsonb), :status, :timestamp
                         )
                         ON CONFLICT (order_id) DO NOTHING
                     """),
@@ -45,6 +45,7 @@ class TradeRepository:
                         "signals": signals_json,
                         "governance": governance_json,
                         "status": str(trade.get("status", "EXECUTED")),
+                        "timestamp": trade.get("timestamp")
                     }
                 )
                 logger.info(f"✅ Persisted trade {trade.get('order_id')} to database")
