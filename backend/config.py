@@ -31,6 +31,12 @@ class TradingConfig:
     MAX_SLIPPAGE = 0.003  # 0.3%
     MAX_EXECUTION_LATENCY_MS = 1500  # 1.5 seconds
     MIN_VOLUME_RATIO = 0.01  # Order must be <1% of recent volume
+
+    # ============================================================================
+    # EXIT TRIGGERS & ADDITIONAL GOVERNANCE
+    # ============================================================================
+    HARDSTOP_PCT = 0.02  # 2% hard stop loss on any single trade
+    MAX_HOLD_TIME_MINUTES = 240  # 4 hours
     
     # ============================================================================
     # ACCOUNT SETTINGS
@@ -56,11 +62,15 @@ Kelly Fraction: {kelly}
 Max Daily Loss: {daily}%
 Max Weekly Loss: {weekly}%
 Trade in Choppy: {choppy}
+Hard Stop Pct: {hardstop}%
+Max Hold Time: {hold_time} mins
 """.format(
             min_conf=cls.MIN_CONFIDENCE,
             max_pos=cls.MAX_POSITION_SIZE,
             kelly=cls.KELLY_FRACTION,
             daily=cls.MAX_DAILY_LOSS * 100,
             weekly=cls.MAX_WEEKLY_LOSS * 100,
-            choppy="DISABLED" if not cls.TRADE_IN_CHOPPY_REGIME else "ENABLED"
+            choppy="DISABLED" if not cls.TRADE_IN_CHOPPY_REGIME else "ENABLED",
+            hardstop=cls.HARDSTOP_PCT * 100,
+            hold_time=cls.MAX_HOLD_TIME_MINUTES,
         ))

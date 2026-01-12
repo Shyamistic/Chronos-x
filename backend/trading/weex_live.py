@@ -158,27 +158,10 @@ class WeexTradingLoop:
             poll_interval_sec=poll_interval,
         )
 
-        # Initialize infrastructure
-        self.kelly_sizer = KellyCriterionSizer(
-            account_equity=50000,
-            max_risk_per_trade=0.02,
-        )
-        self.circuit_breaker = MultiLayerCircuitBreaker(account_equity=50000)
-        self.smart_execution = SmartExecutionEngine(
-            weex_client,
-            max_slippage_pct=0.003,
-            max_latency_ms=1500,
-        )
-        # Keep the monitor passed via constructor, don't overwrite it
-        if self.monitor is None:
-            self.monitor = RealTimePerformanceMonitor()
-        self.mpc_governance = MPCGovernance(num_nodes=3, threshold=2)
-
         self.running = False
-        self.current_pnl = 0.0
-        self.open_positions: List[Dict[str, Any]] = []
-        self.trades: List[Dict[str, Any]] = []
-        self.trade_count = 0
+        
+        # The PaperTrader now holds all state (pnl, positions, trades)
+        # This loop is just a runner.
 
         self._print_startup_banner()
 
@@ -230,12 +213,3 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         print("[WeexTradingLoop] Stopping...")
         self.running = False
         await asyncio.sleep(0.5)
-
-    def get_performance_metrics(self) -> Dict[str, Any]:
-        """Get current performance metrics."""
-        return {
-            "trades_executed": self.trade_count,
-            "open_positions": len(self.open_positions),
-            "current_pnl": self.current_pnl,
-            "monitor_metrics": self.monitor.calculate_metrics(self.trades),
-        }

@@ -290,27 +290,22 @@ async def get_agent_performance() -> Dict[str, Any]:
             "agents": {}
         }
     
-    try:
-        paper_trader = tradingloop.paper_trader
-        
-        return {
-            "status": "running",
-            "agents": {
-                "sentiment": {
-                    "signal_count": getattr(paper_trader, "signal_count", 0),
-                    "avg_confidence": 0.294
-                },
-                "causal": {"status": "active"},
-                "ou": {"status": "active"},
-                "regime": {"status": "active"}
-            }
-        }
+    paper_trader = tradingloop.paper_trader
+    portfolio_manager = paper_trader.portfolio_manager
     
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to retrieve agent metrics: {str(e)}"
+    # Get current weights and performance stats from the Thompson Sampling manager
+    agent_stats = {}
+    weights = portfolio_manager.current_weights()
+    for agent_id in portfolio_manager.agent_ids:
+        stats = portfolio_manager.get_agent_stats(agent_id)
+        agent_stats[agent_id] = {
+            "current_weight": weights.get(agent_id, 0.0),
+            "trades": stats.get("trades", 0),
+            "total_pnl": stats.get("total_pnl", 0.0),
+            "avg_pnl": stats.get("avg_pnl", 0.0),
         }
+
+    return {"status": "running", "agents": agent_stats}
 
 
 @app.get("/analytics/governance-log")
@@ -354,21 +349,14 @@ async def get_governance_log(limit: int = 50):
 @app.get("/governance/rules")
 async def get_governance_rules() -> Dict[str, Any]:
     """Get current governance configuration."""
-    return {
-        "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION",
-        "force_execute_mode": TradingConfig.FORCE_EXECUTE_MODE,
-        "mpc_threshold": 2,
-        "mpc_nodes": 3,
-        "min_confidence": TradingConfig.MIN_CONFIDENCE,
-        "max_position_size": TradingConfig.MAX_POSITION_SIZE,
-        "kelly_fraction": TradingConfig.KELLY_FRACTION,
-        "circuit_breaker": {
-            "max_daily_loss": f"{TradingConfig.MAX_DAILY_LOSS*100}%",
-            "max_weekly_loss": f"{TradingConfig.MAX_WEEKLY_LOSS*100}%",
-            "max_leverage": TradingConfig.MAX_LEVERAGE,
-            "max_drawdown": f"{TradingConfig.MAX_DRAWDOWN*100}%"
-        }
-    }
+    if not (tradingloop and tradingloop.paper_trader):
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Governance engine not active."}
+        )
+    
+    # Return live status of rules from the engine instance
+    return tradingloop.paper_trader.governance.get_rule_status()
 
 
 # ============================================================================
@@ -545,8 +533,7 @@ async def startup_event():
     
     # Initialize WEEX client and trading loop
     weex_client = WeexClient()
-    paper_trader = PaperTrader(symbol="cmt_btcusdt")
-
+    paper_trader = PaperTrader(symbol="cmt_btcusdt", config=TradingConfig())
     tradingloop = WeexTradingLoop(
         weex_client=weex_client,
         paper_trader=paper_trader,

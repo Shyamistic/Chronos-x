@@ -101,7 +101,7 @@ class Rule02_VolatilityCircuitBreaker(GovernanceRule):
     
     def __init__(self, config: TradingConfig):
         super().__init__("VolatilityCircuitBreaker", priority=2, config=config)
-        self.threshold = 0.10  # NOTE: Not currently in TradingConfig, using default
+        self.threshold = 0.10  # Using default, as this is environment-dependent
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         if account.volatility > self.threshold:
@@ -146,7 +146,7 @@ class Rule05_RiskPerTrade(GovernanceRule):
     
     def __init__(self, config: TradingConfig):
         super().__init__("RiskPerTrade", priority=5, config=config)
-        self.max_risk = 0.0025  # NOTE: Not currently in TradingConfig, using default
+        self.max_risk = self.config.HARDSTOP_PCT  # Link to hard stop loss
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         risk_amount = signal.size * abs(signal.stop_loss)
@@ -235,7 +235,7 @@ class Rule10_WinRateMonitor(GovernanceRule):
     
     def __init__(self, config: TradingConfig):
         super().__init__("WinRateMonitor", priority=10, config=config)
-        self.min_win_rate = 0.40 # NOTE: Not currently in TradingConfig, using default
+        self.min_win_rate = 0.40 # Using default, as this is a strategic choice
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         if account.recent_win_rate < self.min_win_rate:
@@ -264,7 +264,7 @@ class Rule12_CorrelationCheck(GovernanceRule):
     
     def __init__(self, config: TradingConfig):
         super().__init__("CorrelationCheck", priority=12, config=config)
-        self.max_correlation = 0.90 # NOTE: Not currently in TradingConfig, using default
+        self.max_correlation = 0.90 # Using default, as this is a strategic choice
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         # In production: check correlation with BTC/ETH

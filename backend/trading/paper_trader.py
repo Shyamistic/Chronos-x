@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 
 import pandas as pd
 
@@ -18,7 +18,6 @@ from backend.agents.signal_agents import (
     OrderFlowAgent,
     SentimentAgent,
     EnsembleAgent,
-    EnsembleDecision as AgentEnsembleDecision,
 )
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
 from backend.agents.regime_detector import RegimeDetector, MarketRegime
@@ -149,7 +148,7 @@ class PaperTrader:
         return wins / len(last)
 
     def _should_exit(
-        self, position: TradeRecord, candle: Candle, ensemble_decision: AgentEnsembleDecision
+        self, position: TradeRecord, candle: Candle, ensemble_decision: Any
     ) -> Tuple[bool, Optional[str]]:
         """Check if a position should be closed based on multiple exit triggers."""
 
