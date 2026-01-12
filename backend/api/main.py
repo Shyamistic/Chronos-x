@@ -313,6 +313,40 @@ async def get_agent_performance() -> Dict[str, Any]:
         }
 
 
+@app.get("/analytics/governance-log")
+async def get_governance_log(limit: int = 50):
+    """
+    Get the governance decision log for transparency.
+    This is a key endpoint for judges to verify governance is working.
+    """
+    if tradingloop and tradingloop.paper_trader:
+        log = tradingloop.paper_trader.governance_trigger_log
+        total_proposals = len(log)
+        blocked_trades = [d for d in log if d.get('blocked', False)]
+        
+        # Calculate statistics
+        acceptance_rate = (total_proposals - len(blocked_trades)) / total_proposals if total_proposals > 0 else 1.0
+        
+        rules_triggered = {}
+        for decision in blocked_trades:
+            for rule in decision.get('triggered_rules', []):
+                rules_triggered[rule] = rules_triggered.get(rule, 0) + 1
+
+        return {
+            "total_proposals": total_proposals,
+            "approved_count": total_proposals - len(blocked_trades),
+            "blocked_count": len(blocked_trades),
+            "acceptance_rate": acceptance_rate,
+            "rules_triggered_counts": rules_triggered,
+            "recent_decisions": log[-limit:]
+        }
+    
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Trading loop not active."}
+    )
+
+
 # ============================================================================
 # GOVERNANCE ENDPOINTS
 # ============================================================================
