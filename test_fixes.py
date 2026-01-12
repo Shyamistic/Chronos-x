@@ -36,6 +36,7 @@ def test_basic_functionality():
         trader = PaperTrader() # Initializes with default config
         assert trader.config is not None
         assert trader.governance is not None
+        assert len(trader.governance.rules) == 12
         
         # Test monitor
         monitor = RealTimePerformanceMonitor(use_database=False)

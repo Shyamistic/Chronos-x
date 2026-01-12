@@ -16,6 +16,7 @@ import asyncio
 import pandas as pd
 
 from backend.trading.paper_trader import PaperTrader
+from backend.config import TradingConfig
 
 
 @dataclass
@@ -55,8 +56,11 @@ class Backtester:
             df = df[df["timestamp"] <= end]
         df = df.reset_index(drop=True)
 
+        # Create a custom config for this specific backtest run
+        backtest_config = TradingConfig()
+        backtest_config.ACCOUNT_EQUITY = self.initial_balance
         # Use the actual PaperTrader to ensure backtest matches live logic
-        trader = PaperTrader(initial_balance=self.initial_balance, symbol=self.symbol)
+        trader = PaperTrader(symbol=self.symbol, config=backtest_config)
 
         # Run the simulation asynchronously
         loop = asyncio.get_event_loop()

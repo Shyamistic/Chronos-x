@@ -1,6 +1,5 @@
 -- a/README.md
-# ChronosX: The Governance-Validated AI Trading Engine for WEEX AI Wars
-
+# ChronosX: The Governance-Validated AI Trading Engine
 ChronosX is an institutional-grade, governance-first autonomous trading system. It is engineered to generate profit within deterministic risk constraints, not despite them.
 
 Unlike "black box" trading bots that fuse signal and execution, ChronosX enforces a strict, auditable separation of concerns. It acts as a control layer between a committee of AI strategy agents and the WEEX exchange, ensuring every single trade is validated against a rigorous governance framework before execution.
@@ -81,11 +80,9 @@ In our initial **ALPHA phase**, we validated the core governance and execution i
 
 Now, for the **WEEX AI Wars competition**, we have enabled controlled exit logic. The system now demonstrates that this same disciplined, governance-first architecture can outperform signal-only approaches by generating consistent, risk-managed profits.
 
-## Deployment Overview
+---
+## Deployment & Operations
 
-ChronosX is deployed as a hardened FastAPI backend behind nginx on AWS EC2, with no internal ports exposed publicly.
-
-- **Backend**  
   - Framework: FastAPI  
   - ASGI server: uvicorn  
   - Process manager: `systemd`  
@@ -106,8 +103,7 @@ ChronosX is deployed as a hardened FastAPI backend behind nginx on AWS EC2, with
 - Security groups expose only HTTP/HTTPS and SSH as needed  
 - No client‑side secrets or credentials in the frontend bundle
 
-This is a production-grade, secure, and scalable setup.
-
+This is a production-grade, secure, and scalable setup. For operational details, see `docs/OPERATIONS_MANUAL.md`.
 ---
 
 ## Competitive Validator FAQ
