@@ -136,13 +136,16 @@ async def get_trading_status() -> Dict[str, Any]:
             "open_positions": 0,
             "mode": "DISCONNECTED"
         }
-    
+
+    paper_trader = tradingloop.paper_trader
     return {
         "running": tradingloop.running,
-        "trades": tradingloop.trade_count,
-        "open_positions": len(tradingloop.open_positions),
+        "trades": len(paper_trader.trades),
+        "open_positions": 1 if paper_trader.open_position else 0,
         "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION",
-        "current_pnl": tradingloop.current_pnl
+        "realized_pnl": paper_trader.total_pnl,
+        "equity": paper_trader.equity,
+        "current_regime": paper_trader.current_regime.value,
     }
 
 

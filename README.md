@@ -1,4 +1,5 @@
-# ChronosX — Autonomous Trading Governance System (ALPHA)
+-- a/README.md
+++ b/README.md
 
 ChronosX is **not** a trading bot.  
 It is a governance‑first execution control layer that sits between strategy agents and the exchange, enforcing deterministic, auditable rules on every trade proposal before any profit optimization is enabled. [web:11]

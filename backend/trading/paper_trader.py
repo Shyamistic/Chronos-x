@@ -295,19 +295,19 @@ class PaperTrader:
 
             side = "buy" if ensemble_decision.direction > 0 else "sell"
 
-            # Position sizing
-            risk_pct = 0.0005
-            risk_amount = self.equity * risk_pct
-            stop_loss_distance = candle.close * 0.005
-            size = risk_amount / stop_loss_distance
+            # Position sizing based on config
+            # Use a fraction of the max position size, scaled by confidence
+            base_size_usdt = self.config.MAX_POSITION_SIZE * self.config.KELLY_FRACTION
+            scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
+            size_in_btc = scaled_size_usdt / candle.close
 
             trading_signal = TradingSignal(
                 symbol=self.symbol,
                 side=side,
-                size=size,
+                size=size_in_btc,
                 confidence=ensemble_decision.confidence,
-                stop_loss=-stop_loss_distance if side == "buy" else stop_loss_distance,
-                take_profit=stop_loss_distance * 2,
+                stop_loss=candle.close * self.config.HARDSTOP_PCT, # Stop loss distance
+                take_profit=candle.close * self.config.HARDSTOP_PCT * 2, # Simple 2:1 R:R
                 timestamp=candle.timestamp,
                 agent_id="ensemble",
             )

@@ -12,12 +12,12 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.25  # Raise to 25% for stronger signals
-    MAX_POSITION_SIZE = 0.01  # BTC (conservative)
+    MIN_CONFIDENCE = 0.25  # Starting confidence threshold
+    MAX_POSITION_SIZE = 100  # Max position size in USDT
     KELLY_FRACTION = 0.25  # Fractional Kelly (1/4)
     
     # ============================================================================
-    # CIRCUIT BREAKERS (ALPHA MODE - LOOSENED 5X)
+    # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
     MAX_DAILY_LOSS = -0.10  # -10% (was -2%)
     MAX_WEEKLY_LOSS = -0.25  # -25% (was -5%)
@@ -41,7 +41,7 @@ class TradingConfig:
     # ============================================================================
     # ACCOUNT SETTINGS
     # ============================================================================
-    ACCOUNT_EQUITY = 50000  # USD
+    ACCOUNT_EQUITY = 1000  # USDT - Competition Capital
     SYMBOL = "cmt_btcusdt"
     
     # ============================================================================
@@ -57,7 +57,7 @@ ChronosX Trading Config
 ======================
 Mode: ALPHA (force_execute=true)
 Min Confidence: {min_conf}
-Max Position: {max_pos} BTC
+Max Position: ${max_pos} USDT
 Kelly Fraction: {kelly}
 Max Daily Loss: {daily}%
 Max Weekly Loss: {weekly}%
