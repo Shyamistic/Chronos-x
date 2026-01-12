@@ -433,7 +433,7 @@ class PaperTrader:
 
         print(
             f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "
-            f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}"
+            f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}, total_pnl={self.total_pnl:.4f}"
         )
 
         self.open_position = None

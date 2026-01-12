@@ -672,7 +672,11 @@ function fmtUSD(x) {
   if (x === null || x === undefined || isNaN(x)) return "—";
   const v = Number(x);
   const sign = v < 0 ? "-" : "";
-  return sign + "$" + Math.abs(v).toFixed(2);
+  const absV = Math.abs(v);
+  if (absV < 1 && absV > 0) {
+      return sign + "$" + absV.toFixed(4);
+  }
+  return sign + "$" + absV.toFixed(2);
 }
 
 function setDot(elId, state) {
