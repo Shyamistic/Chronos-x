@@ -67,7 +67,7 @@ async def system_health():
     database_connected = monitor is not None and monitor.use_database
     total_trades = len(monitor.trades) if monitor and monitor.trades else 0
     last_trade_at = (
-        monitor.trades[-1]["timestamp"] if total_trades > 0 else None
+        monitor.trades[-1].timestamp if total_trades > 0 else None
     )
     
     return {
@@ -205,7 +205,16 @@ async def get_trades(limit: int = 100):
         
         # Fall back to in-memory trades
         elif monitor:
-            trades = monitor.trades[-limit:] if monitor.trades else []
+            # Convert TradeRecord objects to dicts for JSON serialization
+            raw_trades = monitor.trades[-limit:] if monitor.trades else []
+            trades = []
+            for t in raw_trades:
+                # Handle both dicts (from DB) and TradeRecord objects (from memory)
+                if hasattr(t, "__dict__"):
+                    trades.append(t.__dict__)
+                else:
+                    trades.append(t)
+            
             return {
                 "trades": trades,
                 "count": len(trades),
