@@ -5,7 +5,7 @@ ChronosX Paper Trader with Live Regime Detection and Dynamic Bandit Weights.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Any
 import logging
@@ -414,7 +414,7 @@ class PaperTrader:
 
         # NEW: hook external monitor if set
         if hasattr(self, "on_trade_closed") and callable(self.on_trade_closed):
-            self.on_trade_closed(trade)
+            self.on_trade_closed(asdict(trade))
 
         self.trades.append(trade)
         self.balance += pnl

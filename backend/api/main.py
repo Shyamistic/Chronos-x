@@ -66,9 +66,11 @@ async def system_health():
     # Get database status
     database_connected = monitor is not None and monitor.use_database
     total_trades = len(monitor.trades) if monitor and monitor.trades else 0
-    last_trade_at = (
-        monitor.trades[-1].timestamp if total_trades > 0 else None
-    )
+    
+    last_trade_at = None
+    if total_trades > 0:
+        last_trade = monitor.trades[-1]
+        last_trade_at = last_trade.get("timestamp") if isinstance(last_trade, dict) else getattr(last_trade, "timestamp", None)
     
     return {
         "status": "healthy",
