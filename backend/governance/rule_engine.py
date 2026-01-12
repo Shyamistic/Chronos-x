@@ -10,6 +10,8 @@ from typing import List, Optional, Dict
 from enum import Enum
 import logging
 
+from backend.config import TradingConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,12 +62,13 @@ class AccountState:
 class GovernanceRule:
     """Base class for all governance rules"""
     
-    def __init__(self, name: str, priority: int, enabled: bool = True):
+    def __init__(self, name: str, priority: int, config: TradingConfig, enabled: bool = True):
         self.name = name
         self.priority = priority
         self.enabled = enabled
         self.trigger_count = 0
         self.last_triggered = None
+        self.config = config
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         """
@@ -78,12 +81,12 @@ class GovernanceRule:
 class Rule01_MaxDailyLoss(GovernanceRule):
     """Rule 1: Max daily loss threshold"""
     
-    def __init__(self):
-        super().__init__("MaxDailyLoss", priority=1)
-        self.threshold = 0.02  # 2% of account
+    def __init__(self, config: TradingConfig):
+        super().__init__("MaxDailyLoss", priority=1, config=config)
+        self.threshold = abs(self.config.MAX_DAILY_LOSS)
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
-        daily_loss_pct = abs(account.daily_pnl / account.balance)
+        daily_loss_pct = abs(account.daily_pnl / account.balance) if account.balance > 0 else 0.0
         
         if account.daily_pnl < 0 and daily_loss_pct >= self.threshold:
             self.trigger_count += 1
@@ -96,9 +99,9 @@ class Rule01_MaxDailyLoss(GovernanceRule):
 class Rule02_VolatilityCircuitBreaker(GovernanceRule):
     """Rule 2: Volatility circuit breaker"""
     
-    def __init__(self):
-        super().__init__("VolatilityCircuitBreaker", priority=2)
-        self.threshold = 0.10  # 10% ATR
+    def __init__(self, config: TradingConfig):
+        super().__init__("VolatilityCircuitBreaker", priority=2, config=config)
+        self.threshold = 0.10  # NOTE: Not currently in TradingConfig, using default
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         if account.volatility > self.threshold:
@@ -112,9 +115,9 @@ class Rule02_VolatilityCircuitBreaker(GovernanceRule):
 class Rule03_DrawdownRecovery(GovernanceRule):
     """Rule 3: Drawdown recovery mode"""
     
-    def __init__(self):
-        super().__init__("DrawdownRecovery", priority=3)
-        self.threshold = 0.15  # 15% max drawdown
+    def __init__(self, config: TradingConfig):
+        super().__init__("DrawdownRecovery", priority=3, config=config)
+        self.threshold = abs(self.config.MAX_DRAWDOWN)
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         if account.max_drawdown > self.threshold:
@@ -128,9 +131,9 @@ class Rule03_DrawdownRecovery(GovernanceRule):
 class Rule04_LiquidityGuard(GovernanceRule):
     """Rule 4: Liquidity guard (bid-ask spread check)"""
     
-    def __init__(self):
-        super().__init__("LiquidityGuard", priority=4)
-        self.max_spread = 0.005  # 0.5%
+    def __init__(self, config: TradingConfig):
+        super().__init__("LiquidityGuard", priority=4, config=config)
+        self.max_spread = self.config.MAX_SLIPPAGE  # Use slippage as proxy
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         # In production, fetch live spread from order book
@@ -141,9 +144,9 @@ class Rule04_LiquidityGuard(GovernanceRule):
 class Rule05_RiskPerTrade(GovernanceRule):
     """Rule 5: Risk per trade cap"""
     
-    def __init__(self):
-        super().__init__("RiskPerTrade", priority=5)
-        self.max_risk = 0.0025  # 0.25% of account per trade
+    def __init__(self, config: TradingConfig):
+        super().__init__("RiskPerTrade", priority=5, config=config)
+        self.max_risk = 0.0025  # NOTE: Not currently in TradingConfig, using default
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         risk_amount = signal.size * abs(signal.stop_loss)
@@ -161,9 +164,9 @@ class Rule05_RiskPerTrade(GovernanceRule):
 class Rule06_LeverageLimit(GovernanceRule):
     """Rule 6: Leverage limit"""
     
-    def __init__(self):
-        super().__init__("LeverageLimit", priority=6)
-        self.max_leverage = 3.0
+    def __init__(self, config: TradingConfig):
+        super().__init__("LeverageLimit", priority=6, config=config)
+        self.max_leverage = self.config.MAX_LEVERAGE
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         proposed_position_value = account.open_position_value + signal.size
@@ -181,9 +184,9 @@ class Rule06_LeverageLimit(GovernanceRule):
 class Rule07_SignalQuality(GovernanceRule):
     """Rule 7: Signal quality threshold"""
     
-    def __init__(self):
-        super().__init__("SignalQuality", priority=7)
-        self.min_confidence = 0.20
+    def __init__(self, config: TradingConfig):
+        super().__init__("SignalQuality", priority=7, config=config)
+        self.min_confidence = self.config.MIN_CONFIDENCE
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         if signal.confidence < self.min_confidence:
@@ -197,8 +200,8 @@ class Rule07_SignalQuality(GovernanceRule):
 class Rule08_TimeFilter(GovernanceRule):
     """Rule 8: Time-of-day filter (avoid major macro events)"""
     
-    def __init__(self):
-        super().__init__("TimeFilter", priority=8)
+    def __init__(self, config: TradingConfig):
+        super().__init__("TimeFilter", priority=8, config=config)
         # Would integrate with economic calendar API in production
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
@@ -210,9 +213,9 @@ class Rule08_TimeFilter(GovernanceRule):
 class Rule09_PositionConcentration(GovernanceRule):
     """Rule 9: Position concentration limit"""
     
-    def __init__(self):
-        super().__init__("PositionConcentration", priority=9)
-        self.max_concentration = 0.30  # 30% of account
+    def __init__(self, config: TradingConfig):
+        super().__init__("PositionConcentration", priority=9, config=config)
+        self.max_concentration = self.config.MAX_POSITION_SIZE / self.config.ACCOUNT_EQUITY if self.config.ACCOUNT_EQUITY > 0 else 0.30
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         position_value = signal.size
@@ -230,9 +233,9 @@ class Rule09_PositionConcentration(GovernanceRule):
 class Rule10_WinRateMonitor(GovernanceRule):
     """Rule 10: Win rate monitor"""
     
-    def __init__(self):
-        super().__init__("WinRateMonitor", priority=10)
-        self.min_win_rate = 0.40
+    def __init__(self, config: TradingConfig):
+        super().__init__("WinRateMonitor", priority=10, config=config)
+        self.min_win_rate = 0.40 # NOTE: Not currently in TradingConfig, using default
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         if account.recent_win_rate < self.min_win_rate:
@@ -246,8 +249,8 @@ class Rule10_WinRateMonitor(GovernanceRule):
 class Rule11_WhipsawProtection(GovernanceRule):
     """Rule 11: Whipsaw protection"""
     
-    def __init__(self):
-        super().__init__("WhipsawProtection", priority=11)
+    def __init__(self, config: TradingConfig):
+        super().__init__("WhipsawProtection", priority=11, config=config)
         self.recent_reversals = []
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
@@ -259,9 +262,9 @@ class Rule11_WhipsawProtection(GovernanceRule):
 class Rule12_CorrelationCheck(GovernanceRule):
     """Rule 12: Correlation check (diversification)"""
     
-    def __init__(self):
-        super().__init__("CorrelationCheck", priority=12)
-        self.max_correlation = 0.90
+    def __init__(self, config: TradingConfig):
+        super().__init__("CorrelationCheck", priority=12, config=config)
+        self.max_correlation = 0.90 # NOTE: Not currently in TradingConfig, using default
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
         # In production: check correlation with BTC/ETH
@@ -272,20 +275,21 @@ class Rule12_CorrelationCheck(GovernanceRule):
 class GovernanceEngine:
     """Main governance engine coordinator"""
     
-    def __init__(self):
+    def __init__(self, config: Optional[TradingConfig] = None):
+        self.config = config or TradingConfig()
         self.rules: List[GovernanceRule] = [
-            Rule01_MaxDailyLoss(),
-            Rule02_VolatilityCircuitBreaker(),
-            Rule03_DrawdownRecovery(),
-            Rule04_LiquidityGuard(),
-            Rule05_RiskPerTrade(),
-            Rule06_LeverageLimit(),
-            Rule07_SignalQuality(),
-            Rule08_TimeFilter(),
-            Rule09_PositionConcentration(),
-            Rule10_WinRateMonitor(),
-            Rule11_WhipsawProtection(),
-            Rule12_CorrelationCheck(),
+            Rule01_MaxDailyLoss(self.config),
+            Rule02_VolatilityCircuitBreaker(self.config),
+            Rule.Rule03_DrawdownRecovery(self.config),
+            Rule04_LiquidityGuard(self.config),
+            Rule05_RiskPerTrade(self.config),
+            Rule06_LeverageLimit(self.config),
+            Rule07_SignalQuality(self.config),
+            Rule08_TimeFilter(self.config),
+            Rule09_PositionConcentration(self.config),
+            Rule10_WinRateMonitor(self.config),
+            Rule11_WhipsawProtection(self.config),
+            Rule12_CorrelationCheck(self.config),
         ]
         logger.info(f"Governance Engine initialized with {len(self.rules)} rules")
     
