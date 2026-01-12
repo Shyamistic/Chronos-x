@@ -83,7 +83,7 @@ Now, for the **WEEX AI Wars competition**, we have enabled controlled exit logic
 
 ## Deployment Overview
 
-ChronosX is deployed as a hardened FastAPI backend behind nginx on AWS EC2, with no internal ports exposed publicly. [web:7][web:19]
+ChronosX is deployed as a hardened FastAPI backend behind nginx on AWS EC2, with no internal ports exposed publicly.
 
 - **Backend**  
   - Framework: FastAPI  
@@ -104,7 +104,7 @@ ChronosX is deployed as a hardened FastAPI backend behind nginx on AWS EC2, with
 - **Hosting**  
 - AWS EC2 instance  
 - Security groups expose only HTTP/HTTPS and SSH as needed  
-- No client‑side secrets or credentials in the frontend bundle [web:7][web:13]
+- No client‑side secrets or credentials in the frontend bundle
 
 This is a production-grade, secure, and scalable setup.
 

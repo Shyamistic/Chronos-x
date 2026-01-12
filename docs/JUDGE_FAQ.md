@@ -25,18 +25,7 @@ Yes. The `/analytics/governance-log` endpoint provides a real-time log of all pr
 
 ## What makes this “institutional”?
 
-ChronosX adopts patterns used in institutional trading stacks: [web:3][web:11]
-
-- Separation of concerns  
-  - Signals, governance, and execution are isolated components  
-- Deterministic, documented rules  
-  - Every decision is reproducible and auditable  
-- Multi‑party approval (MPC)  
-  - No single component can unilaterally move capital  
-- Production deployment  
-  - FastAPI + uvicorn behind nginx on AWS EC2 with hardened network exposure [web:7][web:19]
-
-The focus is on governance, risk, and execution quality — not on optimistic demo PnL.
+The strict separation of signal generation, governance, and execution, combined with a deterministic rule engine and a focus on auditability, mirrors the control frameworks used by professional trading desks. We prioritize verifiable control over "black box" signals.
 
 ---
 

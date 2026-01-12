@@ -13,10 +13,7 @@ def test_imports():
     try:
         from backend.trading.weex_client import WeexClient
         from backend.trading.paper_trader import PaperTrader
-        from backend.agents.signal_agents import SentimentAgent, TradingSignal
-        from backend.risk.kelly_criterion import KellyCriterionSizer
-        from backend.governance.mpc_governance import MPCGovernance
-        from backend.execution.smart_execution import SmartExecutionEngine
+        from backend.governance.rule_engine import GovernanceEngine
         from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
         print("✅ All imports successful")
         return True
@@ -29,27 +26,16 @@ def test_basic_functionality():
     try:
         from backend.trading.weex_client import WeexClient
         from backend.trading.paper_trader import PaperTrader
-        from backend.agents.signal_agents import SentimentAgent
-        from backend.risk.kelly_criterion import KellyCriterionSizer
-        from backend.governance.mpc_governance import MPCGovernance
+        from backend.governance.rule_engine import GovernanceEngine
         from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
         
         # Test WeexClient
         client = WeexClient()
         
         # Test PaperTrader
-        trader = PaperTrader()
-
-        # Test signal generation
-        sentiment = SentimentAgent()
-        
-        # Test Kelly sizer
-        kelly = KellyCriterionSizer(50000)
-        result = kelly.calculate_position_size(0.4, 0.02, 0.05, 87000)
-        assert "position_size" in result
-        
-        # Test MPC governance
-        mpc = MPCGovernance()
+        trader = PaperTrader() # Initializes with default config
+        assert trader.config is not None
+        assert trader.governance is not None
         
         # Test monitor
         monitor = RealTimePerformanceMonitor(use_database=False)
