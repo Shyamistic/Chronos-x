@@ -291,30 +291,28 @@ header small {
 
 /* GOVERNANCE */
 
-.rules-grid {
+.governance-panel {
+  grid-column: 1 / -1;
+}
+
+.metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 10px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-.rule {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.metric {
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
 }
 
-.rule-label {
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.rule-value {
+.metric .value {
+  font-size: 20px;
   font-family: var(--mono);
-  font-size: 12px;
 }
-
 /* TRADES TABLE */
 
 .trades-panel {
@@ -326,7 +324,7 @@ header small {
   margin-top: 6px;
   border-radius: 9px;
   border: 1px solid var(--border);
-  overflow: hidden;
+  overflow-x: auto;
   background: radial-gradient(circle at top, rgba(15,23,42,0.98), rgba(15,23,42,0.96));
 }
 
@@ -435,19 +433,6 @@ footer {
 }
 
 /* RESPONSIVE */
-
-.alpha-banner {
-  margin-top: 12px;
-  padding: 8px 16px;
-  background: rgba(245,158,11,0.15);
-  border: 1px solid rgba(245,158,11,0.4);
-  border-radius: var(--radius);
-  color: var(--warn);
-  font-size: 11px;
-  font-family: var(--mono);
-  text-align: center;
-  letter-spacing: 0.05em;
-}
 
 @media (max-width: 1024px) {
   .main {
@@ -865,7 +850,7 @@ async function testWeexAPI() {
   const resultEl = document.getElementById('api-test-result');
   resultEl.textContent = 'Testing WEEX API...';
   resultEl.style.color = 'var(--warn)';
-  
+
   try {
     const response = await fetch(`${API_BASE}/weex/api-test`, {
       method: 'POST',
@@ -873,9 +858,9 @@ async function testWeexAPI() {
         'Content-Type': 'application/json'
       }
     });
-    
+
     const result = await response.json();
-    
+
     if (response.ok && result.result?.status === 'success') {
       resultEl.textContent = '✅ WEEX API test successful';
       resultEl.style.color = 'var(--good)';
@@ -896,7 +881,7 @@ async function uploadAILog() {
   const resultEl = document.getElementById('api-test-result');
   resultEl.textContent = 'Uploading AI log to WEEX...';
   resultEl.style.color = 'var(--warn)';
-  
+
   try {
     const response = await fetch(`${API_BASE}/weex/upload-ai-log`, {
       method: 'POST',
@@ -904,9 +889,9 @@ async function uploadAILog() {
         'Content-Type': 'application/json'
       }
     });
-    
+
     const result = await response.json();
-    
+
     if (response.ok && result.status === 'success') {
       resultEl.textContent = `✅ AI log uploaded (Order: ${result.order_id})`;
       resultEl.style.color = 'var(--good)';

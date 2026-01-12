@@ -158,6 +158,10 @@ class WeexTradingLoop:
             poll_interval_sec=poll_interval,
         )
 
+        # Connect monitor to paper_trader for trade recording
+        if self.monitor and hasattr(self.monitor, "record_trade"):
+            self.paper_trader.on_trade_closed = self.monitor.record_trade
+
         self.running = False
         
         # The PaperTrader now holds all state (pnl, positions, trades)
