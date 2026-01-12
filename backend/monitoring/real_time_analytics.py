@@ -37,6 +37,11 @@ class RealTimePerformanceMonitor:
             try:
                 from backend.database.trade_repository import TradeRepository
                 self.repo = TradeRepository()
+                # Load recent history to populate metrics immediately
+                recent_trades = self.repo.get_all_trades(limit=1000)
+                if recent_trades:
+                    self.trades = recent_trades
+                    logger.info(f"Loaded {len(self.trades)} historical trades from database")
             except ImportError:
                 logger.warning("TradeRepository not available, running in memory-only mode")
                 self.use_database = False
