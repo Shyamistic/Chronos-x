@@ -171,11 +171,11 @@ class WeexTradingLoop:
 ================================================================================
 [WeexTradingLoop] TRADING CONFIGURATION
 ================================================================================
-Account Equity:         $50,000
+Account Equity:         ${equity}
 Circuit Breaker:        6-layer enabled
 Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
 ================================================================================
-        """
+        """.format(equity=self.paper_trader.config.ACCOUNT_EQUITY)
         )
         TradingConfig.print_config()
 

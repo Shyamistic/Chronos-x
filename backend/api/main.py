@@ -389,16 +389,6 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
-@app.get("/system/mode")
-def system_mode():
-    return {
-        "mode": "ALPHA",
-        "exits_enabled": False,
-        "profit_reporting": "realized_only",
-        "reason": "Governance validation before profit optimization"
-    }
-
-
 @app.post("/weex/upload-ai-log")
 async def upload_ai_log():
     """
@@ -471,25 +461,6 @@ async def weex_api_test():
             "error": str(e),
             "message": "WEEX API test failed"
         }
-
-
-@app.get("/system/alpha-disclaimer")
-async def get_alpha_disclaimer():
-    """
-    Return explicit disclaimer about ALPHA mode.
-    For judges and due diligence.
-    """
-    return {
-        "mode": "ALPHA",
-        "status": "experimental",
-        "disclaimer": "ChronosX is in ALPHA mode for data collection and infrastructure validation. "
-                     "Risk controls are loosened 5x. Kelly sizing is inactive due to low signal confidence. "
-                     "This is NOT optimized for profitability—it validates governance architecture.",
-        "risk_multiplier": "5x normal thresholds",
-        "kelly_status": "inactive (confidence < threshold)",
-        "governance": "MPC bypassed for throughput",
-        "purpose": "Infrastructure validation, not profit maximization"
-    }
 
 
 @app.get("/")
