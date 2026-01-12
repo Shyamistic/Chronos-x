@@ -7,7 +7,7 @@ Provides control, monitoring, and analytics for live trading.
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import asyncio
+import asyncio, importlib, os
 from typing import Optional, Dict, Any
 import json
 import time
@@ -367,6 +367,41 @@ async def get_governance_rules() -> Dict[str, Any]:
 # ============================================================================
 # CONFIGURATION & INFO ENDPOINTS
 # ============================================================================
+
+@app.post("/admin/reload-config")
+async def reload_config(password: str = ""):
+    """
+    Reloads the TradingConfig module from disk and applies it to the live
+    trading engine. Requires ADMIN_PASSWORD to be set as an env var.
+    """
+    # Simple security check. In a real production system, use a more robust auth method.
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if not admin_password or password != admin_password:
+        raise HTTPException(status_code=403, detail="Unauthorized: Admin password required.")
+
+    if not (tradingloop and tradingloop.paper_trader):
+        raise HTTPException(status_code=503, detail="Trading loop not active.")
+
+    try:
+        # Re-import the config module to pick up changes from the .py file
+        import backend.config
+        importlib.reload(backend.config)
+        
+        # Create a new instance of the reloaded config class
+        new_config = backend.config.TradingConfig()
+        
+        # Pass the new config down to the live paper_trader instance
+        tradingloop.paper_trader.reload_config(new_config)
+        
+        print("\n[API] CONFIGURATION HOT-RELOADED\n")
+        new_config.print_config()
+        
+        return {
+            "status": "success",
+            "message": "Configuration reloaded and applied to the live trading engine.",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reload config: {str(e)}")
 
 
 @app.post("/weex/upload-ai-log")

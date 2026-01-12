@@ -389,3 +389,10 @@ class GovernanceEngine:
                 logger.warning(f"Rule disabled: {rule_name}")
                 return
         raise ValueError(f"Rule not found: {rule_name}")
+
+    def reload_config(self, new_config: TradingConfig):
+        """Reloads the configuration for all rules."""
+        self.config = new_config
+        # Re-initialize all rules with the new config
+        self.__init__(config=new_config)
+        logger.warning("Governance Engine configuration reloaded.")

@@ -564,3 +564,9 @@ class PaperTrader:
                 s.agent_id for s in self.last_ensemble_decision.agent_signals
             ],
         }
+
+    def reload_config(self, new_config: TradingConfig):
+        """Reloads the configuration for the trader and its components."""
+        self.config = new_config
+        self.governance.reload_config(new_config)
+        logger.warning("PaperTrader configuration reloaded.")
