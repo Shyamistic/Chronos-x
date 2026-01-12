@@ -419,13 +419,14 @@ class PaperTrader:
         self.daily_pnl += pnl
         self.recent_pnls.append(pnl)
 
-        # Record with risk-adjusted reward
-        self.portfolio_manager.record_trade_result(
-            agent_id=trade.agent_id,
-            pnl=pnl,
-            position_size=trade.size,
-            entry_price=trade.entry_price,
-        )
+        # Distribute the result to all contributing agents for the bandit to learn
+        for agent_id in trade.contributing_agents:
+            self.portfolio_manager.record_trade_result(
+                agent_id=agent_id,
+                pnl=pnl,
+                position_size=trade.size,
+                entry_price=trade.entry_price,
+            )
 
         print(
             f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "

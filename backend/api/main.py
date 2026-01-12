@@ -64,21 +64,11 @@ async def system_health():
     trading_enabled = tradingloop is not None and tradingloop.running
     
     # Get database status
-    database_connected = True
-    try:
-        if monitor and monitor.use_database and monitor.repo:
-            # Try a simple query to verify DB connection
-            from backend.database.trade_repository import TradeRepository
-            summary = TradeRepository.get_performance_summary()
-            last_trade_at = summary.get("last_trade_at")
-            total_trades = summary.get("total_trades", 0)
-        else:
-            last_trade_at = None
-            total_trades = len(monitor.trades) if monitor else 0
-    except Exception as e:
-        database_connected = False
-        last_trade_at = None
-        total_trades = 0
+    database_connected = monitor is not None and monitor.use_database
+    total_trades = len(monitor.trades) if monitor and monitor.trades else 0
+    last_trade_at = (
+        monitor.trades[-1]["timestamp"] if total_trades > 0 else None
+    )
     
     return {
         "status": "healthy",
