@@ -359,34 +359,14 @@ async def get_governance_rules() -> Dict[str, Any]:
         )
     
     # Return live status of rules from the engine instance
-    return tradingloop.paper_trader.governance.get_rule_status()
+    return {
+        "rules": tradingloop.paper_trader.governance.get_rule_status()
+    }
 
 
 # ============================================================================
 # CONFIGURATION & INFO ENDPOINTS
 # ============================================================================
-
-@app.get("/config")
-async def get_config() -> Dict[str, Any]:
-    """Get trading configuration."""
-    return {
-        "force_execute_mode": TradingConfig.FORCE_EXECUTE_MODE,
-        "min_confidence": TradingConfig.MIN_CONFIDENCE,
-        "max_position_size": TradingConfig.MAX_POSITION_SIZE,
-        "kelly_fraction": TradingConfig.KELLY_FRACTION,
-        "symbol": "cmt_btcusdt",
-        "account_equity": 50000
-    }
-
-
-@app.get("/health")
-async def health_check() -> Dict[str, Any]:
-    """Simple health check endpoint."""
-    return {
-        "status": "healthy",
-        "trading_loop": "running" if tradingloop and tradingloop.running else "stopped",
-        "api_version": "1.0.0"
-    }
 
 
 @app.post("/weex/upload-ai-log")

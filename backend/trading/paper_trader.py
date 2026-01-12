@@ -54,13 +54,13 @@ class TradeRecord:
 class PaperTrader:
     def __init__(
         self,
-        initial_balance: float = 10_000.0,
         symbol: str = "cmt_btcusdt",
         config: Optional[TradingConfig] = None,
     ):
         self.symbol = symbol
-        self.initial_balance = initial_balance
         self.config = config or TradingConfig()
+        initial_balance = self.config.ACCOUNT_EQUITY
+        self.initial_balance = initial_balance
         self.balance = initial_balance
         self.equity = initial_balance
         self.max_equity = initial_balance

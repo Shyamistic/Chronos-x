@@ -1,5 +1,5 @@
 -- a/README.md
-# ChronosX: The Governance-Validated AI Trading Engine
+# ChronosX: The Governance-Validated AI Trading Engine for WEEX AI Wars
 
 ChronosX is an institutional-grade, governance-first autonomous trading system. It is engineered to generate profit within deterministic risk constraints, not despite them.
 
@@ -8,10 +8,6 @@ Unlike "black box" trading bots that fuse signal and execution, ChronosX enforce
 **Our philosophy:** Disciplined, auditable trading outperforms signal-only approaches.
 
 ---
-
-## What ChronosX Does
-
-ChronosX sits between strategy agents and the exchange and owns the final yes/no on execution.
 
 Most AI trading systems in competitions fail because:
 - **Judges can't verify the trades are real** (they could be simulated).
@@ -41,10 +37,7 @@ ChronosX wins because it is built on a foundation of transparency and control:
 
 ---
 
-## Design Philosophy
 ## System Architecture: The Three-Layer Separation
-
----
 
 ChronosX enforces an institutional-grade separation between signal generation, governance, and execution. This ensures that strategy agents can never bypass risk controls.
 

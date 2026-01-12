@@ -1,26 +1,15 @@
-# Judge & Reviewer FAQ
-
-This FAQ is written specifically for hackathon judges, investors, and technically literate reviewers evaluating ChronosX.
+# 
 
 ---
 
 ## Why is PnL zero?
+## Why was your PnL zero initially?
 
-ChronosX reports **realized PnL only**, and in ALPHA mode exits are intentionally disabled.
+In our pre-competition **ALPHA phase**, we focused on validating our governance engine with exits intentionally disabled. This demonstrated the safety and auditability of our architecture under live market conditions.
+t this same disciplined, governance-first approach can generate consistent, risk-managed profits.
 
-- No exits → no closed trades → no realized PnL  
-- Open positions are not marked to market  
-- Unrealized PnL is never displayed [web:18][web:20]
 
-PnL = 0 is therefore the *correct* and expected behavior in ALPHA.
-
----
-
-## Are these real trades?
-
-Yes.
-
-- All fills shown in the execution ledger are real exchange executions, not simulations  
+Yes.tions, not simulations  
 - Orders run through the governance layer and are sent to the exchange via the Execution Engine  
 - Execution metrics (slippage, latency, fill status) are measured from real market interactions [web:9]
 
