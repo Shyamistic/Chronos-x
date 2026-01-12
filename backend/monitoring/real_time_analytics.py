@@ -98,8 +98,11 @@ class RealTimePerformanceMonitor:
         # Extract returns
         returns = []
         for t in trades_to_use:
-            pnl = t.get("pnl", 0)
-            notional = t.get("entry_price", 1) * t.get("size", 1)
+            pnl = t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)
+            size = t.get("size", 1) if isinstance(t, dict) else getattr(t, "size", 1)
+            entry_price = t.get("entry_price", 1) if isinstance(t, dict) else getattr(t, "entry_price", 1)
+            
+            notional = entry_price * size
             if notional > 0:
                 ret = pnl / notional
                 returns.append(ret)
@@ -112,10 +115,10 @@ class RealTimePerformanceMonitor:
         # --- Core Metrics ---
         
         # Total P&L
-        total_pnl = sum(t.get("pnl", 0) for t in trades_to_use)
+        total_pnl = sum(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0) for t in trades_to_use)
         
         # Win Rate
-        wins = sum(1 for t in trades_to_use if t.get("pnl", 0) > 0)
+        wins = sum(1 for t in trades_to_use if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) > 0)
         num_trades = len(trades_to_use)
         win_rate = wins / num_trades if num_trades > 0 else 0.0
         
@@ -131,19 +134,19 @@ class RealTimePerformanceMonitor:
         max_dd = float(np.min(drawdown)) if len(drawdown) > 0 else 0.0
         
         # Profit Factor
-        gross_profit = sum(t.get("pnl", 0) for t in trades_to_use if t.get("pnl", 0) > 0)
-        gross_loss = abs(sum(t.get("pnl", 0) for t in trades_to_use if t.get("pnl", 0) < 0))
+        gross_profit = sum(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0) for t in trades_to_use if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) > 0)
+        gross_loss = abs(sum(t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0) for t in trades_to_use if (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) < 0))
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
         
         # Recovery Factor
         recovery_factor = abs(total_pnl / max_dd) if max_dd < 0 else 0.0
         
         # Average Trade Size
-        avg_trade_size = np.mean([t.get("size", 0) for t in trades_to_use])
+        avg_trade_size = np.mean([t.get("size", 0) if isinstance(t, dict) else getattr(t, "size", 0) for t in trades_to_use])
         
         # Consecutive wins/losses
-        consecutive_wins = self._count_consecutive(lambda t: t.get("pnl", 0) > 0, trades_to_use)
-        consecutive_losses = self._count_consecutive(lambda t: t.get("pnl", 0) < 0, trades_to_use)
+        consecutive_wins = self._count_consecutive(lambda t: (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) > 0, trades_to_use)
+        consecutive_losses = self._count_consecutive(lambda t: (t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)) < 0, trades_to_use)
         
         return {
             "total_pnl": float(total_pnl),
