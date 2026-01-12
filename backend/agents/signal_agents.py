@@ -203,6 +203,14 @@ class MLClassifierAgent:
         self.model: Optional[XGBClassifier] = None
         self.trained = False
         self.last_features_dim: Optional[int] = None
+        self.history: List[Candle] = []
+        self.lookback = 300
+
+    def update(self, candle: Candle):
+        """Update the agent with new candle data."""
+        self.history.append(candle)
+        if len(self.history) > self.lookback:
+            self.history.pop(0)
 
     def _engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Feature engineering for ML model."""
@@ -333,8 +341,24 @@ class MLClassifierAgent:
         )
 
     def generate(self) -> Optional[TradingSignal]:
-        """Placeholder for compatibility; override with predict()."""
-        return None
+        """Generate signal from internal history."""
+        if not self.history:
+            return None
+        
+        # Convert history to DataFrame
+        data = [
+            {
+                "timestamp": c.timestamp,
+                "open": c.open,
+                "high": c.high,
+                "low": c.low,
+                "close": c.close,
+                "volume": c.volume,
+            }
+            for c in self.history
+        ]
+        df = pd.DataFrame(data)
+        return self.predict(df)
 
 
 # ============================================================
