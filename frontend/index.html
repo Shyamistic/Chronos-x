@@ -846,7 +846,7 @@ async function testWeexAPI() {
   const resultEl = document.getElementById('api-test-result');
   resultEl.textContent = 'Testing WEEX API...';
   resultEl.style.color = 'var(--warn)';
-  
+
   try {
     const response = await fetch(`${API_BASE}/weex/api-test`, {
       method: 'POST',
@@ -854,9 +854,9 @@ async function testWeexAPI() {
         'Content-Type': 'application/json'
       }
     });
-    
+
     const result = await response.json();
-    
+
     if (response.ok && result.result?.status === 'success') {
       resultEl.textContent = '✅ WEEX API test successful';
       resultEl.style.color = 'var(--good)';
@@ -877,7 +877,7 @@ async function uploadAILog() {
   const resultEl = document.getElementById('api-test-result');
   resultEl.textContent = 'Uploading AI log to WEEX...';
   resultEl.style.color = 'var(--warn)';
-  
+
   try {
     const response = await fetch(`${API_BASE}/weex/upload-ai-log`, {
       method: 'POST',
@@ -885,9 +885,9 @@ async function uploadAILog() {
         'Content-Type': 'application/json'
       }
     });
-    
+
     const result = await response.json();
-    
+
     if (response.ok && result.status === 'success') {
       resultEl.textContent = `✅ AI log uploaded (Order: ${result.order_id})`;
       resultEl.style.color = 'var(--good)';
@@ -918,4 +918,3 @@ setInterval(tickClock, 1000);
 </script>
 </body>
 </html>
-
