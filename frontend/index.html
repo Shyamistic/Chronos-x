@@ -415,6 +415,15 @@ tbody tr:hover {
   background: rgba(127,29,29,0.2);
 }
 
+.reason {
+  white-space: normal;
+  max-width: 300px;
+}
+
+.rule-name {
+  font-weight: 600;
+  color: var(--text);
+}
 /* FOOTER */
 
 footer {
@@ -574,79 +583,51 @@ footer {
       </div>
     </section>
 
-    <!-- GOVERNANCE -->
-    <section class="panel">
+    <!-- GOVERNANCE TRANSPARENCY DASHBOARD (NEW) -->
+    <section class="panel governance-panel">
       <div class="panel-inner">
         <h2>
-          <span>System Intent</span>
-          <span class="pill">ALPHA validation</span>
+          <span>Governance Transparency</span>
+          <span class="pill">Real-time Audit</span>
         </h2>
-        <div class="kv-list">
-          <div class="kv">
-            <span class="kv-label">Mode</span>
-            <span id="mode" class="value warn">ALPHA</span>
-          </div>
-          <div class="kv">
-            <span class="kv-label">Exits Enabled</span>
-            <span id="exits" class="value bad">❌</span>
-          </div>
-          <div class="kv">
-            <span class="kv-label">Profit Reporting</span>
-            <span id="profit-type" class="value soft">Realized only</span>
-          </div>
-          <div class="kv">
-            <span class="kv-label">Objective</span>
-            <span id="objective" class="value soft">Safety > Profit</span>
-          </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- GOVERNANCE RULES -->
-    <section class="panel">
-      <div class="panel-inner">
-        <h2>
-          <span>Governance Rules</span>
-          <span class="pill">Autonomous controls</span>
-        </h2>
-        <div class="rules-grid">
-          <div class="rule">
-            <span class="rule-label">MPC Threshold</span>
-            <span id="mpc" class="rule-value">—</span>
-          </div>
-          <div class="rule">
-            <span class="rule-label">Force execute</span>
-            <span id="force" class="rule-value">—</span>
-          </div>
-          <div class="rule">
-            <span class="rule-label">Min confidence</span>
-            <span id="conf" class="rule-value">—</span>
-          </div>
-          <div class="rule">
-            <span class="rule-label">Max position</span>
-            <span id="pos" class="rule-value">—</span>
-          </div>
+        <div class="metric-grid">
+            <div class="metric">
+                <h3>Proposal Acceptance Rate</h3>
+                <p class="value" id="acceptance-rate">—%</p>
+                <p class="label" id="proposal-counts">0 approved / 0 total</p>
+            </div>
+            <div class="metric">
+                <h3>Trades Blocked</h3>
+                <p class="value" id="blocked-count">0</p>
+                <p class="label">Preventing potential losses</p>
+            </div>
+            <div class="metric">
+                <h3>Top Blocking Rules</h3>
+                <div id="top-blocking-rules">
+                    <p class="label">No blocks yet.</p>
+                </div>
+            </div>
         </div>
-        
-        <!-- Governance Counters -->
-        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
-          <div style="font-size: 10px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.06em; text-transform: uppercase;">Governance Actions (24h)</div>
-          <div class="kv-list" style="gap: 4px;">
-            <div class="kv">
-              <span class="kv-label">Trades approved</span>
-              <span id="approved" class="value good">—</span>
-            </div>
-            <div class="kv">
-              <span class="kv-label">Trades blocked</span>
-              <span id="blocked" class="value soft">—</span>
-            </div>
-            <div class="kv">
-              <span class="kv-label">Circuit breaker triggers</span>
-              <span id="triggers" class="value soft">—</span>
-            </div>
-          </div>
+
+        <h2>Recent Governance Decisions</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Proposal</th>
+                        <th>Decision</th>
+                        <th>Reason / Triggered Rules</th>
+                        <th>Risk Score</th>
+                    </tr>
+                </thead>
+                <tbody id="governance-log-table">
+                    <!-- Rows will be inserted here by JavaScript -->
+                </tbody>
+            </table>
         </div>
-        
+
         <!-- WEEX API Test -->
         <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
           <div style="font-size: 10px; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.06em; text-transform: uppercase;">WEEX Compliance</div>
@@ -666,7 +647,7 @@ footer {
       <div class="panel-inner">
         <h2>
           <span>Execution Ledger</span>
-          <span class="pill">Auditable · Latest 10 fills</span>
+          <span class="pill">Auditable · Live Fills</span>
         </h2>
         <div class="table-wrap">
           <table>
@@ -762,12 +743,11 @@ function classifyDrawdown(dd) {
 
 async function refresh() {
   try {
-    const [health, gov, metrics, trades, mode] = await Promise.all([
+    const [health, govLog, metrics, trades] = await Promise.all([
       fetchJSON("/system/health"),
-      fetchJSON("/governance/rules"),
+      fetchJSON("/analytics/governance-log?limit=20"),
       fetchJSON("/analytics/metrics"),
       fetchJSON("/analytics/trades?limit=10"),
-      fetchJSON("/system/mode")
     ]);
 
     // System
@@ -815,30 +795,40 @@ async function refresh() {
     ddEl.className =
       "metric-value " + classifyDrawdown(metrics.max_drawdown);
 
-    // Governance
-    document.getElementById("mpc").textContent =
-      gov.mpc_threshold != null ? gov.mpc_threshold : "—";
+    // Governance Dashboard
+    document.getElementById('acceptance-rate').textContent = `${(govLog.acceptance_rate * 100).toFixed(1)}%`;
+    document.getElementById('proposal-counts').textContent = `${govLog.approved_count} approved / ${govLog.total_proposals} total`;
+    document.getElementById('blocked-count').textContent = govLog.blocked_count;
 
-    const forceEl = document.getElementById("force");
-    forceEl.textContent = gov.force_execute_mode ? "ENABLED" : "DISABLED";
-    forceEl.className =
-      "rule-value " + (gov.force_execute_mode ? "warn" : "soft");
+    const rulesEl = document.getElementById('top-blocking-rules');
+    rulesEl.innerHTML = '';
+    const sortedRules = Object.entries(govLog.rules_triggered_counts || {}).sort(([,a],[,b]) => b-a);
 
-    document.getElementById("conf").textContent = fmtPct(gov.min_confidence);
-    document.getElementById("pos").textContent =
-      gov.max_position_size != null ? gov.max_position_size : "—";
+    if (sortedRules.length > 0) {
+        sortedRules.slice(0, 3).forEach(([rule, count]) => {
+            const p = document.createElement('p');
+            p.innerHTML = `<span class="rule-name">${rule}:</span> ${count} blocks`;
+            rulesEl.appendChild(p);
+        });
+    } else {
+        rulesEl.innerHTML = '<p class="label" style="font-size: 10px;">No blocks yet.</p>';
+    }
 
-    // System Intent
-    document.getElementById("mode").textContent = mode.mode || "ALPHA";
-    document.getElementById("exits").textContent = mode.exits_enabled ? "✓" : "❌";
-    document.getElementById("profit-type").textContent = mode.profit_reporting || "Realized only";
-    document.getElementById("objective").textContent = "Safety > Profit";
-
-    // Governance Counters (simulated for now)
-    const totalTrades = (trades.trades || []).length;
-    document.getElementById("approved").textContent = totalTrades;
-    document.getElementById("blocked").textContent = "0";
-    document.getElementById("triggers").textContent = "0";
+    const govTableBody = document.getElementById('governance-log-table');
+    govTableBody.innerHTML = '';
+    govLog.recent_decisions.forEach(decision => {
+        const row = document.createElement('tr');
+        const decisionClass = decision.blocked ? 'bad' : 'good';
+        const decisionText = decision.blocked ? 'BLOCKED' : 'APPROVED';
+        row.innerHTML = `
+            <td>${new Date(decision.timestamp).toLocaleTimeString()}</td>
+            <td>${decision.side.toUpperCase()} ${decision.size_before.toFixed(4)}</td>
+            <td><span class="status-pill ${decisionClass}">${decisionText}</span></td>
+            <td class="reason">${decision.triggered_rules.join(', ') || 'All checks passed'}</td>
+            <td>${decision.risk_score.toFixed(1)}</td>
+        `;
+        govTableBody.appendChild(row);
+    });
 
     // Trades
     const tb = document.getElementById("trades");
@@ -949,4 +939,3 @@ setInterval(tickClock, 1000);
 </script>
 </body>
 </html>
-

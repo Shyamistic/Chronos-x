@@ -1,0 +1,114 @@
+<!-- frontend/governance.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChronosX - Governance Transparency</title>
+    <link rel="stylesheet" href="style.css"> <!-- Assuming you have a stylesheet -->
+</head>
+<body>
+    <div class="container">
+        <h1>Governance Transparency</h1>
+        <p>Real-time audit of the ChronosX decision-making process.</p>
+
+        <div class="metric-grid">
+            <div class="metric">
+                <h3>Proposal Acceptance Rate</h3>
+                <p class="value" id="acceptance-rate">—%</p>
+                <p class="label" id="proposal-counts">0 approved / 0 total</p>
+            </div>
+            <div class="metric">
+                <h3>Trades Blocked by Governance</h3>
+                <p class="value" id="blocked-count">0</p>
+                <p class="label">Preventing potential losses</p>
+            </div>
+            <div class="metric">
+                <h3>Top Blocking Rules</h3>
+                <div id="top-blocking-rules">
+                    <p class="label">No blocks yet.</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>Recent Governance Decisions</h2>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Proposal</th>
+                        <th>Decision</th>
+                        <th>Reason / Triggered Rules</th>
+                        <th>Risk Score</th>
+                    </tr>
+                </thead>
+                <tbody id="governance-log-table">
+                    <!-- Rows will be inserted here by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api'; // Adjust if your proxy is different
+
+        async function fetchGovernanceData() {
+            try {
+                const response = await fetch(`${API_BASE}/analytics/governance-log?limit=20`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                // Update KPIs
+                document.getElementById('acceptance-rate').textContent = `${(data.acceptance_rate * 100).toFixed(1)}%`;
+                document.getElementById('proposal-counts').textContent = `${data.approved_count} approved / ${data.total_proposals} total`;
+                document.getElementById('blocked-count').textContent = data.blocked_count;
+
+                // Update Top Blocking Rules
+                const rulesEl = document.getElementById('top-blocking-rules');
+                rulesEl.innerHTML = '';
+                const sortedRules = Object.entries(data.rules_triggered_counts || {}).sort(([,a],[,b]) => b-a);
+
+                if (sortedRules.length > 0) {
+                    sortedRules.slice(0, 3).forEach(([rule, count]) => {
+                        const p = document.createElement('p');
+                        p.innerHTML = `<span class="rule-name">${rule}:</span> ${count} blocks`;
+                        rulesEl.appendChild(p);
+                    });
+                } else {
+                    rulesEl.innerHTML = '<p class="label">No blocks yet.</p>';
+                }
+
+
+                // Update Recent Decisions Table
+                const tableBody = document.getElementById('governance-log-table');
+                tableBody.innerHTML = ''; // Clear old data
+
+                data.recent_decisions.forEach(decision => {
+                    const row = document.createElement('tr');
+                    const decisionClass = decision.blocked ? 'bad' : 'good';
+                    const decisionText = decision.blocked ? 'BLOCKED' : 'APPROVED';
+
+                    row.innerHTML = `
+                        <td>${new Date(decision.timestamp).toLocaleTimeString()}</td>
+                        <td>${decision.side.toUpperCase()} ${decision.size_before.toFixed(4)}</td>
+                        <td><span class="status-pill ${decisionClass}">${decisionText}</span></td>
+                        <td class="reason">${decision.triggered_rules.join(', ') || 'All checks passed'}</td>
+                        <td>${decision.risk_score.toFixed(1)}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+
+            } catch (error) {
+                console.error("Failed to fetch governance data:", error);
+            }
+        }
+
+        // Initial fetch and then refresh every 5 seconds
+        fetchGovernanceData();
+        setInterval(fetchGovernanceData, 5000);
+    </script>
+</body>
+</html>

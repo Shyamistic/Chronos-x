@@ -12,7 +12,7 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.30  # Starting confidence threshold
+    MIN_CONFIDENCE = 0.29  # Starting confidence threshold
     MAX_POSITION_SIZE = 100  # Max position size in USDT
     KELLY_FRACTION = 0.25  # Fractional Kelly (1/4)
     
