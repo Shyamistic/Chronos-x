@@ -412,7 +412,7 @@ class PaperTrader:
             ensemble_confidence=self.open_position.ensemble_confidence,
         )
 
-        # NEW: hook external monitor if set
+        # NEW: hook external monitor if set (ensure dict is passed)
         if hasattr(self, "on_trade_closed") and callable(self.on_trade_closed):
             self.on_trade_closed(asdict(trade))
 

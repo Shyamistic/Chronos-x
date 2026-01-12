@@ -56,7 +56,11 @@ class RealTimePerformanceMonitor:
         self.trades.append(trade)
         
         # Update equity curve
-        cumulative_pnl = sum(t.get("pnl", 0) for t in self.trades)
+        cumulative_pnl = 0.0
+        for t in self.trades:
+            pnl = t.get("pnl", 0) if isinstance(t, dict) else getattr(t, "pnl", 0)
+            cumulative_pnl += pnl
+            
         self.equity_curve.append(cumulative_pnl)
         
         # Persist to database (if enabled)
