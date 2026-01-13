@@ -40,7 +40,7 @@ class TradingConfig:
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE
     # ============================================================================
     HARDSTOP_PCT = 0.02  # Fallback 2% hard stop loss on any single trade (if ATR not available)
-    BREAKEVEN_PROFIT_PCT = 0.0005 # Small profit to cover fees for breakeven protection
+    BREAKEVEN_PROFIT_PCT = 0.0020 # 0.2% profit to strictly cover fees (0.12% roundtrip) + buffer
     
     # ATR-based adaptive stops (multipliers for ATR value)
     ATR_STOP_MULTIPLIER = 2.0 # 2x ATR for stop loss

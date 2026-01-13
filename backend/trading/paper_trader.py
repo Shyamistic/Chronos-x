@@ -462,8 +462,9 @@ class PaperTrader:
             if (is_long and new_direction == -1) or (not is_long and new_direction == 1):
                 # Before closing, check if the flip is due to low confidence.
                 # If confidence is very low, it might be noise, so don't flip aggressively.
-                if ensemble_decision.confidence < self.config.MIN_CONFIDENCE:
-                    print(f"[PaperTrader] SIGNAL FLIP: Suppressing due to low confidence ({ensemble_decision.confidence:.2f}).")
+                flip_threshold = self.config.MIN_CONFIDENCE + 0.1 if regime.value == 'chop' else self.config.MIN_CONFIDENCE
+                if ensemble_decision.confidence < flip_threshold:
+                    print(f"[PaperTrader] SIGNAL FLIP: Suppressing due to low confidence ({ensemble_decision.confidence:.2f} < {flip_threshold:.2f}).")
                     return
                 print(f"[PaperTrader] SIGNAL FLIP: Closing {current_position.side} position for {candle.symbol}.")
                 self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason="signal_flip")
@@ -518,7 +519,7 @@ class PaperTrader:
                 return
             
             # Regime-based trading restriction (Concentrate Risk)
-            if self.config.COMPETITION_MODE and not self.config.TRADE_IN_CHOPPY_REGIME and regime.value == 'CHOP':
+            if self.config.COMPETITION_MODE and not self.config.TRADE_IN_CHOPPY_REGIME and regime.value == 'chop':
                 print("[PaperTrader] COMPETITION MODE: Blocking new entry in CHOP regime.")
                 return
             

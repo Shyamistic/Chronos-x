@@ -482,12 +482,13 @@ class SentimentAgent:
         # For competition, any directional move is a signal.
         direction = 1 if self.last_score >= 0 else -1
 
-        # New confidence logic: floor is actionable, scales aggressively.
-        # This ensures any signal from this agent can pass the MIN_CONFIDENCE filter.
-        base_confidence = 0.56  # Set just above the config's MIN_CONFIDENCE of 0.55
-        # Scale confidence with the size of the price move
+        # New confidence logic: floor is below threshold, requires momentum to scale up.
+        # This filters out noise that cannot cover fees.
+        base_confidence = 0.40
+        # Scale confidence: need ~0.015% move to reach 0.55 confidence
+        # 0.00015 * 1000 = 0.15 -> 0.40 + 0.15 = 0.55
         scaled_confidence = base_confidence + (abs(self.last_score) * 1000)
-        confidence = min(0.80, scaled_confidence) # Cap at 0.80
+        confidence = min(0.95, scaled_confidence)
 
         return TradingSignal(
             agent_id=self.agent_id,
