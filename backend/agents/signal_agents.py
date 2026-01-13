@@ -598,7 +598,7 @@ class EnsembleAgent:
             # Calculate a penalty score (0-1)
             disagreement_score = min(long_votes, short_votes) / max(long_votes, short_votes)
             # Apply a penalty factor (e.g., 0.5)
-            disagreement_penalty = 0.5 * disagreement_score
+            disagreement_penalty = 0.25 * disagreement_score
             confidence = base_confidence * (1 - disagreement_penalty)
             print(f"[Ensemble] Disagreement detected ({long_votes}L/{short_votes}S). Penalty: {disagreement_penalty:.2f}")
         else:
