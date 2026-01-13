@@ -76,7 +76,7 @@ async def system_health():
         "status": "healthy",
         "trading_enabled": trading_enabled,
         "last_trade_at": str(last_trade_at) if last_trade_at else None,
-        "symbols_active": ["cmt_btcusdt"],
+        "symbols_active": tradingloop.symbols if tradingloop else [],
         "governance_mode": "alpha" if TradingConfig.FORCE_EXECUTE_MODE else "production",
         "uptime_seconds": uptime_seconds,
         "database_connected": database_connected,
@@ -136,7 +136,7 @@ async def get_trading_status() -> Dict[str, Any]:
     return {
         "running": tradingloop.running,
         "trades": len(paper_trader.trades),
-        "open_positions": 1 if paper_trader.open_position else 0,
+        "open_positions": len(paper_trader.open_positions),
         "mode": "ALPHA (force_execute=true)" if TradingConfig.FORCE_EXECUTE_MODE else "PRODUCTION",
         "realized_pnl": paper_trader.total_pnl,
         "equity": paper_trader.equity,
@@ -526,11 +526,19 @@ async def startup_event():
     
     # Initialize WEEX client and trading loop
     weex_client = WeexClient()
-    paper_trader = PaperTrader(symbol="cmt_btcusdt", config=TradingConfig())
+    paper_trader = PaperTrader(config=TradingConfig())
+
+    # Define the portfolio of symbols for the main API-driven loop
+    symbols_to_trade = [
+        "cmt_btcusdt",
+        "cmt_ethusdt",
+        "cmt_solusdt",
+    ]
+
     tradingloop = WeexTradingLoop(
         weex_client=weex_client,
         paper_trader=paper_trader,
-        symbol="cmt_btcusdt",
+        symbols=symbols_to_trade,
         poll_interval=5.0,
         monitor=monitor  # ✅ Pass monitor here
     )
