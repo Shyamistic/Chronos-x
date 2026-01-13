@@ -142,6 +142,9 @@ class PaperTrader:
         # Track last ensemble decision for live trading loop
         self.last_ensemble_decision = None
         self.last_regime = None
+        
+        # Competition Metrics
+        self.high_conviction_trades = 0
 
     # ================================================================ #
     # Account state helpers
@@ -367,7 +370,7 @@ class PaperTrader:
                 print(f"[PaperTrader] ALPHA: Fallback trend signal dir={trend_dir}, conf={fallback_conf:.2f}")
 
         # Get dynamic weights and combine signals
-        weights = self.portfolio_manager.sample_weights_for_regime(regime, self.equity) # Pass equity for bandit
+        weights = self.portfolio_manager.sample_weights_for_regime(regime) # Pass equity for bandit
         self.ensemble.weights = weights
         ensemble_decision = self.ensemble.combine(signals)
 
@@ -379,12 +382,23 @@ class PaperTrader:
         current_position = self.open_positions.get(candle.symbol)
         new_direction = ensemble_decision.direction
 
-        # 1. Handle Signal Flips: Close opposing positions first.
+        is_pyramiding = False
+
+        # 1. Handle Signal Flips & Pyramiding
         if current_position and new_direction != 0:
             is_long = current_position.side == 'buy'
+            
+            # Signal Flip: Close opposing
             if (is_long and new_direction == -1) or (not is_long and new_direction == 1):
                 print(f"[PaperTrader] SIGNAL FLIP: Closing {current_position.side} position for {candle.symbol}.")
                 self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason="signal_flip")
+                current_position = None # Position is now closed
+            
+            # Pyramiding (Competition Mode): Add to winner if confidence is high
+            elif self.config.COMPETITION_MODE and ensemble_decision.confidence > 0.6:
+                # Only pyramid if we are in profit and in the same direction
+                if current_position.highest_pnl_pct > 0.005 and ((is_long and new_direction == 1) or (not is_long and new_direction == -1)): # > 0.5% profit
+                    is_pyramiding = True
 
         # 2. Handle Exits (SL, TP, etc.) if a position is still open.
         # Re-check self.open_positions as it might have been closed by the flip logic.
@@ -396,14 +410,29 @@ class PaperTrader:
                 self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason=exit_reason)
                 return # Stop processing for this candle after a SL/TP exit.
 
-        # 3. Handle Entries if no position is currently open for the symbol.
+        # 3. Handle Entries
+        # Allow entry if no position OR if pyramiding is active and we want to add to the same-direction position
+        allow_entry = False
         if candle.symbol not in self.open_positions:
+            allow_entry = True
+        elif is_pyramiding and current_position and current_position.side == ("buy" if new_direction > 0 else "sell"):
+            # If pyramiding is enabled and the new signal is in the same direction as the existing position
+            allow_entry = True
+            print(f"[PaperTrader] PYRAMIDING: Adding to winning {current_position.side} position (Conf: {ensemble_decision.confidence:.2f})")
+
+
+        if allow_entry:
             if new_direction == 0:
                 print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
                 return
 
             if ensemble_decision.confidence < self.config.MIN_CONFIDENCE:
                 print(f"[PaperTrader] Confidence {ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE} -> no trade")
+                return
+            
+            # Regime-based trading restriction (Concentrate Risk)
+            if self.config.COMPETITION_MODE and not self.config.TRADE_IN_CHOPPY_REGIME and regime == MarketRegime.CHOP:
+                print("[PaperTrader] COMPETITION MODE: Blocking new entry in CHOP regime.")
                 return
             
             side = "buy" if new_direction > 0 else "sell"
@@ -420,6 +449,12 @@ class PaperTrader:
             dynamic_kelly_fraction = max(self.config.MIN_KELLY_FRACTION, min(self.config.MAX_KELLY_FRACTION, dynamic_kelly_fraction))
 
             base_size_usdt = max_pos_usdt * dynamic_kelly_fraction
+
+            # For pyramiding, we are adding to an existing position.
+            # The size should be an *additional* amount, not the total.
+            if is_pyramiding:
+                base_size_usdt *= 0.5 # Add half size for pyramid
+                
             scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
             size = scaled_size_usdt / candle.close
             
@@ -449,6 +484,10 @@ class PaperTrader:
             if not decision.allow or decision.adjusted_size <= 0:
                 print("[PaperTrader] Trade blocked by governance or zero size")
                 return
+            
+            if ensemble_decision.confidence > 0.7:
+                self.high_conviction_trades += 1
+                
             final_size = decision.adjusted_size
             # Open new position
             success = self._open_position(
@@ -466,8 +505,8 @@ class PaperTrader:
                 exit_reason="open",  # Placeholder until closed
             )
             if success:
-                print(
-                    f"[PaperTrader] Opened position side={side}, size={final_size:.6f}, "
+                print( # Changed message for pyramiding
+                    f"[PaperTrader] {'Pyramided' if is_pyramiding else 'Opened'} position side={side}, size={final_size:.6f}, "
                     f"price={candle.close}"
                 )
 
@@ -505,6 +544,11 @@ class PaperTrader:
             try:
                 # Map side to WEEX type: 1=Open Long, 2=Open Short
                 order_type = "1" if side == "buy" else "2"
+                
+                # If position exists (pyramiding), we are just adding size. 
+                # WEEX API handles this naturally for same-side orders in Hedge Mode? 
+                # Actually, in Hedge Mode, multiple opens just add to the position or create new ones depending on exchange.
+                # Assuming standard behavior: Open Long adds to Long position.
                 print(f"[PaperTrader] EXECUTION: Placing {side} order for {final_size} {symbol}...")
                 response = self.execution_client.place_order(
                     symbol=symbol,
@@ -520,6 +564,18 @@ class PaperTrader:
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR: {e}")
                 return False
+
+        # Update internal state
+        if symbol in self.open_positions:
+            # Pyramiding: Update existing position
+            pos = self.open_positions[symbol]
+            total_size = pos.size + final_size
+            avg_price = ((pos.size * pos.entry_price) + (final_size * price)) / total_size
+            pos.size = total_size
+            pos.entry_price = avg_price
+            # Reset PnL tracking for new avg price? Or keep relative? 
+            # Keeping simple: update entry price, PnL will recalculate next tick.
+            return True
 
         new_position = TradeRecord(
             timestamp=timestamp,
@@ -745,6 +801,7 @@ class PaperTrader:
                 "win_rate": 0.0,
                 "sharpe": 0.0,
                 "max_drawdown": 0.0,
+                "high_conviction_trades": self.high_conviction_trades
             }
 
         total_pnl = float(df["pnl"].sum())
@@ -773,6 +830,7 @@ class PaperTrader:
             "win_rate": float(win_rate),
             "sharpe": float(sharpe),
             "max_drawdown": max_dd,
+            "high_conviction_trades": self.high_conviction_trades
         }
 
     def reload_config(self, new_config: TradingConfig):

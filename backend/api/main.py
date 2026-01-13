@@ -204,6 +204,7 @@ async def get_trading_status() -> Dict[str, Any]:
         "realized_pnl": paper_trader.total_pnl,
         "equity": paper_trader.equity,
         "current_regime": paper_trader.current_regime.value,
+        "high_conviction_trades": paper_trader.high_conviction_trades,
     }
 
 
@@ -594,8 +595,8 @@ async def startup_event():
     # Define the portfolio of symbols for the main API-driven loop
     symbols_to_trade = [
         "cmt_btcusdt",
-        "cmt_ethusdt",
-        "cmt_solusdt",
+        # "cmt_ethusdt", # Concentrating risk to a single market for competition
+        # "cmt_solusdt", # Concentrating risk to a single market for competition
     ]
 
     tradingloop = WeexTradingLoop(

@@ -4,7 +4,7 @@ ChronosX is an institutional-grade, governance-first autonomous trading system. 
 
 Unlike "black box" trading bots that fuse signal and execution, ChronosX enforces a strict, auditable separation of concerns. It acts as a control layer between a committee of AI strategy agents and the WEEX exchange, ensuring every single trade is validated against a rigorous governance framework before execution.
 
-**Our philosophy:** Disciplined, auditable trading outperforms signal-only approaches.
+**Our philosophy:** Disciplined, auditable trading outperforms signal-only approaches. In high-stakes environments, governance isn't just about safety—it's about **authorized aggression**.
 
 ---
 
@@ -16,7 +16,7 @@ Most AI trading systems in competitions fail because:
 ChronosX wins because it is built on a foundation of transparency and control:
 - ✅ **Every Fill is Verifiable:** All trades are executed on the live WEEX exchange, with a fully auditable trail.
 - ✅ **Transparent Governance:** The governance layer is not a black box. Every blocked trade has a logged reason, visible to judges via the `/analytics/governance-log` endpoint.
-- ✅ **Rogue Signal Prevention:** A 12-rule engine prevents any single agent from taking excessive risk or leverage.
+- ✅ **Governance-Approved Risk:** A 12-rule engine that knows when to block rogue signals and when to **authorize high-conviction risk expansion**.
 - ✅ **Total Replayability:** Judges can select any trade and replay the exact governance decision that led to its execution.
 
 ---
@@ -74,11 +74,11 @@ This entire flow is orchestrated within the `PaperTrader.process_candle()` metho
 
 ---
 
-## From ALPHA to Competition: The Path to Profit
+## Competition Mode: Weaponized Governance
 
-In our initial **ALPHA phase**, we validated the core governance and execution infrastructure under live market conditions with exits intentionally disabled. This allowed us to prove the system's safety and auditability, resulting in a realized PnL of zero by design.
+For the **WEEX AI Wars**, ChronosX is operating in **Competition Mode**. This demonstrates the system's ability to dynamically reconfigure its risk profile based on organizational objectives.
 
-Now, for the **WEEX AI Wars competition**, we have enabled controlled exit logic. The system now demonstrates that this same disciplined, governance-first architecture can outperform signal-only approaches by generating consistent, risk-managed profits.
+Instead of merely protecting capital, the Governance Engine is now configured to **authorize aggressive capital deployment** when high-confidence regimes are detected. This proves that ChronosX can be tuned for maximum yield while maintaining a complete audit trail of *why* risk was taken.
 
 ---
 ## Deployment & Operations

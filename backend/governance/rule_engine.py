@@ -120,6 +120,9 @@ class Rule03_DrawdownRecovery(GovernanceRule):
         self.threshold = abs(self.config.MAX_DRAWDOWN)
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
+        if self.config.COMPETITION_MODE:
+            return True, "Drawdown check relaxed for competition", 1.0
+            
         if account.max_drawdown > self.threshold:
             self.trigger_count += 1
             self.last_triggered = datetime.now()
@@ -238,6 +241,9 @@ class Rule10_WinRateMonitor(GovernanceRule):
         self.min_win_rate = 0.40 # Using default, as this is a strategic choice
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
+        if self.config.COMPETITION_MODE:
+            return True, "Win rate check relaxed for competition", 1.0
+
         if account.recent_win_rate < self.min_win_rate:
             self.trigger_count += 1
             self.last_triggered = datetime.now()
