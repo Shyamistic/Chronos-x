@@ -48,6 +48,15 @@ class TradingConfig:
     # ============================================================================
     TRADE_IN_CHOPPY_REGIME = False  # ✅ NEW: Disable trading in choppy markets
     
+    @property
+    def MAX_POSITION_SIZE(self):
+        """
+        DEPRECATED: For backward compatibility with components like the old rule engine.
+        This calculates the legacy static size from the new dynamic percentage.
+        """
+        # print("WARNING: Accessing deprecated config 'MAX_POSITION_SIZE'. Update component to use 'MAX_POSITION_AS_PCT_EQUITY'.")
+        return self.ACCOUNT_EQUITY * self.MAX_POSITION_AS_PCT_EQUITY
+
     @classmethod
     def print_config(cls):
         """Print current configuration (for startup logs)"""
