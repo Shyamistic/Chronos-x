@@ -77,8 +77,10 @@ def close_all():
             # For blind close, we'll add dummy entries with minimum step size
             # We will try to close both long and short sides
             min_size = MIN_STEP_SIZES.get(sym, 0.0001)
-            # Add multiple small blind close attempts
-            for _ in range(5): # Try 5 times for each side
+            
+            # Number of aggressive blind close attempts per side per symbol
+            NUM_BLIND_CLOSE_ATTEMPTS = 20 # Increased from 5 for more aggressive closing
+            for _ in range(NUM_BLIND_CLOSE_ATTEMPTS):
                 positions.append({"symbol": sym, "side": "1", "holdAmount": str(min_size)}) # Try to close long
                 positions.append({"symbol": sym, "side": "2", "holdAmount": str(min_size)}) # Try to close short
         print("Blind close attempts added to queue.")
