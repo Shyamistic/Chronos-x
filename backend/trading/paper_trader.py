@@ -397,7 +397,9 @@ class PaperTrader:
             # Pyramiding (Competition Mode): Add to winner if confidence is high
             elif self.config.COMPETITION_MODE and ensemble_decision.confidence > 0.6:
                 # Only pyramid if we are in profit and in the same direction
-                if current_position.highest_pnl_pct > 0.005 and ((is_long and new_direction == 1) or (not is_long and new_direction == -1)): # > 0.5% profit
+                # STEP 3: MANDATORY PYRAMIDING ON WINNERS
+                is_strong_regime = regime.value in ("bull_trend", "bear_trend")
+                if current_position.highest_pnl_pct > 0.003 and is_strong_regime and ((is_long and new_direction == 1) or (not is_long and new_direction == -1)): # > 0.3% profit
                     is_pyramiding = True
 
         # 2. Handle Exits (SL, TP, etc.) if a position is still open.
@@ -422,6 +424,11 @@ class PaperTrader:
 
 
         if allow_entry:
+            # STEP 1: BAN TRADING IN UNKNOWN REGIME
+            if regime == MarketRegime.UNKNOWN:
+                print("[PaperTrader] COMPETITION RULE: Trade blocked in UNKNOWN regime.")
+                return
+
             if new_direction == 0:
                 print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
                 return
@@ -447,15 +454,25 @@ class PaperTrader:
             elif regime.value in ("chop", "reversal"):
                 dynamic_kelly_fraction *= self.config.KELLY_CHOP_MULTIPLIER
             dynamic_kelly_fraction = max(self.config.MIN_KELLY_FRACTION, min(self.config.MAX_KELLY_FRACTION, dynamic_kelly_fraction))
-
             base_size_usdt = max_pos_usdt * dynamic_kelly_fraction
+
+            # STEP 2: CONVICTION-BASED POSITION EXPLOSION
+            conf = ensemble_decision.confidence
+            if conf < 0.75:
+                size_multiplier = 1.0
+            elif conf < 0.85:
+                size_multiplier = 2.0
+            else: # conf >= 0.85
+                size_multiplier = 3.0
+            
+            scaled_size_usdt = base_size_usdt * size_multiplier
 
             # For pyramiding, we are adding to an existing position.
             # The size should be an *additional* amount, not the total.
             if is_pyramiding:
-                base_size_usdt *= 0.5 # Add half size for pyramid
+                # Add half of the calculated 'explosion' size for pyramid
+                scaled_size_usdt *= 0.5
                 
-            scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
             size = scaled_size_usdt / candle.close
             
             trading_signal = TradingSignal(
@@ -479,7 +496,7 @@ class PaperTrader:
                 f"risk_score={decision.risk_score:.1f}, reason={decision.reason}"
             )
             self._log_governance_trigger(
-                candle.timestamp, trading_signal, decision, regime
+                candle.timestamp, trading_signal, decision, regime, is_pyramiding
             )
             if not decision.allow or decision.adjusted_size <= 0:
                 print("[PaperTrader] Trade blocked by governance or zero size")
@@ -732,11 +749,22 @@ class PaperTrader:
         signal: TradingSignal,
         decision: GovernanceDecision,
         regime: MarketRegime,
+        is_pyramiding: bool,
     ):
         """Log governance rule triggers for analytics."""
+        # STEP 5: FIX THE NARRATIVE
+        decision_type = "STANDARD_APPROVAL"
+        if not decision.allow:
+            decision_type = "BLOCKED"
+        elif is_pyramiding:
+            decision_type = "PYRAMID"
+        elif signal.confidence >= 0.85 and regime.value in ("bull_trend", "bear_trend"):
+            decision_type = "RISK_ESCALATION"
+
         self.governance_trigger_log.append(
             {
                 "timestamp": timestamp.isoformat(),
+                "decision_type": decision_type,
                 "side": signal.side,
                 "size_before": signal.size,
                 "size_after": decision.adjusted_size,
