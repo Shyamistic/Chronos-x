@@ -153,12 +153,23 @@ class WeexClient:
         params = {}
         if symbol:
             params["symbol"] = symbol
-        return self._request(
-            "GET",
-            "/capi/v2/position/openPositions",
-            params=params,
-            auth=True,
-        )
+        
+        # Try v1 first (often more stable), fallback to v2
+        try:
+            return self._request(
+                "GET",
+                "/capi/v1/position/openPositions",
+                params=params,
+                auth=True,
+            )
+        except Exception as e:
+            print(f"[WeexClient] v1 openPositions failed ({e}), trying v2...")
+            return self._request(
+                "GET",
+                "/capi/v2/position/openPositions",
+                params=params,
+                auth=True,
+            )
 
     # ------------------------------------------------------------------
     # Trading endpoints (auth required)
