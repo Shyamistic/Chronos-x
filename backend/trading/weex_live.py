@@ -209,10 +209,11 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         self.running = True
         print(f"[WeexTradingLoop] Starting live trading for symbols: {self.symbols}")
 
+        MAX_RECONCILIATION_ATTEMPTS = 5 # Limit attempts to avoid infinite loop on persistent API errors
         # --- RECONCILIATION START ---
         print("[WeexTradingLoop] Fetching open positions from WEEX for reconciliation...")
         if hasattr(self.client, "get_open_positions"):
-            while True:  # Retry indefinitely on startup
+            for attempt in range(MAX_RECONCILIATION_ATTEMPTS):
                 try:
                     # Fetch positions (generic fetch, not specific to one symbol if possible)
                     resp = self.client.get_open_positions(symbol=None)
