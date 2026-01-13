@@ -487,7 +487,7 @@ class SentimentAgent:
         base_confidence = 0.40
         # Scale confidence: need ~0.015% move to reach 0.55 confidence
         # 0.00015 * 1000 = 0.15 -> 0.40 + 0.15 = 0.55
-        scaled_confidence = base_confidence + (abs(self.last_score) * 1000)
+        scaled_confidence = base_confidence + (abs(self.last_score) * 500)
         confidence = min(0.95, scaled_confidence)
 
         return TradingSignal(

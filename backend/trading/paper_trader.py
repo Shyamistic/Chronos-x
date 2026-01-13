@@ -462,7 +462,7 @@ class PaperTrader:
             if (is_long and new_direction == -1) or (not is_long and new_direction == 1):
                 # Before closing, check if the flip is due to low confidence.
                 # If confidence is very low, it might be noise, so don't flip aggressively.
-                flip_threshold = self.config.MIN_CONFIDENCE + 0.1 if regime.value == 'chop' else self.config.MIN_CONFIDENCE
+                flip_threshold = self.config.MIN_CONFIDENCE + 0.25 if regime.value == 'chop' else self.config.MIN_CONFIDENCE
                 if ensemble_decision.confidence < flip_threshold:
                     print(f"[PaperTrader] SIGNAL FLIP: Suppressing due to low confidence ({ensemble_decision.confidence:.2f} < {flip_threshold:.2f}).")
                     return
