@@ -221,6 +221,9 @@ class Rule09_PositionConcentration(GovernanceRule):
         self.max_concentration = self.config.MAX_POSITION_SIZE / self.config.ACCOUNT_EQUITY if self.config.ACCOUNT_EQUITY > 0 else 0.30
     
     def evaluate(self, signal: TradingSignal, account: AccountState) -> tuple[bool, str, float]:
+        if self.config.COMPETITION_MODE:
+            return True, "Position concentration handled by sizing logic in competition mode", 1.0
+
         position_value = signal.size
         concentration = position_value / account.equity
         

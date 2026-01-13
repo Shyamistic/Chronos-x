@@ -74,6 +74,19 @@ This entire flow is orchestrated within the `PaperTrader.process_candle()` metho
 
 ---
 
+## Resilience Under Fire: State Management
+
+A core tenet of institutional-grade systems is resilience. During the WEEX AI Wars, we observed intermittent `521 Server Error` responses from the exchange's position-reporting endpoints. A naive system would halt, state-blind and unable to trade.
+
+ChronosX is designed to handle this.
+
+1.  **Non-Blocking Reconciliation:** On startup, ChronosX attempts to reconcile its internal state with the exchange. If the API is unstable, it does not block.
+2.  **Internal Ledger as Source of Truth:** After multiple failed attempts, the system logs the degradation and promotes its own internal trade ledger to the primary source of truth.
+3.  **Adaptive Risk Posture:** While in this fallback mode, high-risk strategies like pyramiding are automatically disabled by the `PaperTrader` to prevent compounding risk on a potentially desynchronized state.
+
+This behavior demonstrates a robust, fault-tolerant architecture that prioritizes operational continuity and risk management over blind dependence on external services. It's a feature, not a bug.
+---
+
 ## Competition Mode: Weaponized Governance
 
 For the **WEEX AI Wars**, ChronosX is operating in **Competition Mode**. This demonstrates the system's ability to dynamically reconfigure its risk profile based on organizational objectives.

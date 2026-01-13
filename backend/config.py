@@ -13,7 +13,7 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.40 if COMPETITION_MODE else 0.50 # Adjusted for competition to allow more trades
+    MIN_CONFIDENCE = 0.55 if COMPETITION_MODE else 0.50 # Increased for higher quality signals
     MAX_POSITION_AS_PCT_EQUITY = 0.90 if COMPETITION_MODE else 0.50  # Allow near-full deployment
     KELLY_FRACTION = 0.80 if COMPETITION_MODE else 0.40  # Aggressive sizing
     KELLY_TREND_MULTIPLIER = 1.2 # Increase Kelly in strong trends

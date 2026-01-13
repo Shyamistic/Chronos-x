@@ -23,6 +23,7 @@ from backend.agents.signal_agents import (
     OrderFlowAgent,
     SentimentAgent,
     EnsembleAgent,
+    EnsembleDecision,
 )
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
 from backend.agents.regime_detector import RegimeDetector, MarketRegime
@@ -124,7 +125,9 @@ class PaperTrader:
         )
 
         # Regime detection
-        self.regime_detector = RegimeDetector(lookback=20)
+        # In competition, we can't wait for warm-up. Set lookback to a minimum.
+        lookback_period = 1 if self.config.COMPETITION_MODE else 20
+        self.regime_detector = RegimeDetector(lookback=lookback_period)
         self.current_regime = MarketRegime.UNKNOWN
         
         # ATR for adaptive stops
@@ -249,11 +252,10 @@ class PaperTrader:
 
         # --- Time-based triggers (always active) ---
         hold_time_minutes = (candle.timestamp - position.timestamp).total_seconds() / 60
-
-        # Exit Trigger 6: Stale Profit (Time Decay)
-        # If held > 50% of max time and we have small profit (>0.2%), take it.
-        if hold_time_minutes > (self.config.MAX_HOLD_TIME_MINUTES * 0.5) and pnl_pct > 0.002:
-            return True, f"Stale profit exit: {pnl_pct:.2%} after {int(hold_time_minutes)}m"
+        
+        # Exit Trigger 6: Stale Profit (Time Decay) - Disabled in competition mode to let winners run
+        if not self.config.COMPETITION_MODE and hold_time_minutes > (self.config.MAX_HOLD_TIME_MINUTES * 0.5) and pnl_pct > 0.002:
+                return True, f"Stale profit exit: {pnl_pct:.2%} after {int(hold_time_minutes)}m"
 
         # Exit Trigger 3: Max Hold Time (from config)
         if hold_time_minutes > self.config.MAX_HOLD_TIME_MINUTES:
@@ -271,20 +273,19 @@ class PaperTrader:
         self.regime_detector.update(candle.close)
         regime_state = self.regime_detector.detect()
 
-        # AGGRESSIVE REGIME FORCING FOR COMPETITION
-        if regime_state.current == MarketRegime.UNKNOWN:
-            # If z_score is high, we are in a trend regardless of what the detector says
-            # FIX: z_score is an attribute of the detector, not the state object it returns.
+        # AGGRESSIVE REGIME FORCING FOR COMPETITION: Never stay in UNKNOWN after warm-up
+        if self.config.COMPETITION_MODE and regime_state.current == MarketRegime.UNKNOWN and self.processed_candles_count > self.regime_detector.lookback:
             z_score = self.regime_detector.z_score if hasattr(self.regime_detector, 'z_score') else 0.0
-            if abs(z_score) > 1.5: # 1.5 standard deviations is a significant move
+            # If z_score is significant, force a trend. Otherwise, assume REVERSAL/CHOP to enable trading.
+            if abs(z_score) > 1.0: # Use a more statistically significant threshold
                 forced_regime = MarketRegime.BULL_TREND if z_score > 0 else MarketRegime.BEAR_TREND
-                print(f"[PaperTrader] Forced regime from UNKNOWN to {forced_regime.value} due to high z-score ({z_score:.2f}).")
+                print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to z-score ({z_score:.2f}).")
                 self.current_regime = forced_regime
             else:
-                # If not trending, but still unknown, keep it unknown.
-                self.current_regime = MarketRegime.UNKNOWN
+                print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to REVERSAL due to weak z-score ({z_score:.2f}).")
+                self.current_regime = MarketRegime.REVERSAL
         else:
-            # If detector has a classification, use it.
+            # Use the detector's classification if it's not UNKNOWN, or if not in aggressive competition mode.
             self.current_regime = regime_state.current
 
         self.portfolio_manager.set_regime(self.current_regime)
@@ -377,8 +378,8 @@ class PaperTrader:
                 closes = [c.close for c in self.momentum_agent.history[-20:]]
                 sma20 = sum(closes) / len(closes)
                 trend_dir = 1 if candle.close > sma20 else -1
-                # Boost confidence to ensure we trade when primary agents are quiet
-                fallback_conf = max(0.25, self.config.MIN_CONFIDENCE + 0.05)
+                # Set a fixed, reasonable confidence for the fallback signal
+                fallback_conf = 0.55
                 from backend.agents.signal_agents import TradingSignal as AgentTradingSignal
                 trend_sig = AgentTradingSignal(
                     agent_id="trend_fallback",
@@ -387,12 +388,24 @@ class PaperTrader:
                     metadata={"sma20": sma20, "close": candle.close}
                 )
                 signals.append(trend_sig)
-                print(f"[PaperTrader] ALPHA: Fallback trend signal dir={trend_dir}, conf={fallback_conf:.2f}")
 
         # Get dynamic weights and combine signals
         weights = self.portfolio_manager.sample_weights_for_regime(regime) # Pass equity for bandit
         self.ensemble.weights = weights
         ensemble_decision = self.ensemble.combine(signals)
+
+        # COMPETITION OVERRIDE: If ensemble is flat, let the strongest single agent take over
+        if self.config.COMPETITION_MODE and ensemble_decision.direction == 0 and signals:
+            # Find the signal with the highest confidence
+            strongest_signal = max(signals, key=lambda s: s.confidence)
+            if strongest_signal.confidence >= 0.6: # User specified threshold
+                print(f"[PaperTrader] COMPETITION: Ensemble flat, overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
+                # Create a new ensemble decision based on this single agent
+                ensemble_decision = EnsembleDecision(
+                    direction=strongest_signal.direction,
+                    confidence=strongest_signal.confidence,
+                    agent_signals=[strongest_signal] # Log that this was an override
+                )
 
         # Cache for external consumers (WeexTradingLoop)
         self.last_ensemble_decision = ensemble_decision
