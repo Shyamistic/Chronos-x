@@ -282,7 +282,7 @@ class PaperTrader:
                 self.current_regime = forced_regime
             else:
                 print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to REVERSAL due to weak z-score ({z_score:.2f}).")
-                self.current_regime = MarketRegime.REVERSAL
+                self.current_regime = MarketRegime("reversal") # Access enum member by its value string
         else:
             # Use the detector's classification if it's not UNKNOWN, or if not in aggressive competition mode.
             self.current_regime = regime_state.current
