@@ -23,7 +23,6 @@ from backend.agents.signal_agents import (
     OrderFlowAgent,
     SentimentAgent,
     EnsembleAgent,
-    EnsembleDecision,
 )
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
 from backend.agents.regime_detector import RegimeDetector, MarketRegime
@@ -400,6 +399,7 @@ class PaperTrader:
             strongest_signal = max(signals, key=lambda s: s.confidence)
             if strongest_signal.confidence >= 0.6: # User specified threshold
                 print(f"[PaperTrader] COMPETITION: Ensemble flat, overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
+                from backend.agents.signal_agents import EnsembleDecision
                 # Create a new ensemble decision based on this single agent
                 ensemble_decision = EnsembleDecision(
                     direction=strongest_signal.direction,
