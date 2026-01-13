@@ -442,9 +442,9 @@ class PaperTrader:
             
             # Dynamic Kelly Fraction based on regime and confidence
             dynamic_kelly_fraction = self.config.KELLY_FRACTION # Default
-            if regime.value in (MarketRegime.BULL_TREND.value, MarketRegime.BEAR_TREND.value):
+            if regime.value in ("bull_trend", "bear_trend"):
                 dynamic_kelly_fraction *= self.config.KELLY_TREND_MULTIPLIER
-            elif regime.value in ('CHOP', MarketRegime.REVERSAL.value):
+            elif regime.value in ("chop", "reversal"):
                 dynamic_kelly_fraction *= self.config.KELLY_CHOP_MULTIPLIER
             dynamic_kelly_fraction = max(self.config.MIN_KELLY_FRACTION, min(self.config.MAX_KELLY_FRACTION, dynamic_kelly_fraction))
 
