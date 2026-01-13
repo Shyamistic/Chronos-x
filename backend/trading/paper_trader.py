@@ -464,7 +464,6 @@ class PaperTrader:
                 print(f"[PaperTrader] EXECUTION: Placing {side} order for {final_size} {symbol}...")
                 response = self.execution_client.place_order(
                     symbol=symbol,
-                    size=str(final_size),
                     size=f"{final_size:.{get_precision(symbol)}f}",
                     type_=order_type,
                     price=str(price),
@@ -542,7 +541,6 @@ class PaperTrader:
                 print(f"[PaperTrader] EXECUTION: Closing {position_to_close.side} position for {symbol}...")
                 response = self.execution_client.place_order(
                     symbol=symbol,
-                    size=str(position_to_close.size),
                     size=f"{position_to_close.size:.{get_precision(symbol)}f}",
                     type_=close_type,
                     price=str(exit_price),
