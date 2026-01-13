@@ -12,13 +12,14 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.29  # Starting confidence threshold
-    MAX_POSITION_SIZE = 
+    MIN_CONFIDENCE = 0.24  # Loosen to allow more confident trades from the ensemble
+    MAX_POSITION_AS_PCT_EQUITY = 0.50  # Enable dynamic sizing: max position is 50% of equity
+    KELLY_FRACTION = 0.25  # Define quarter-Kelly for sizing calculations
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
-    MAX_DAILY_LOSS = -0.10  # -10% (was -2%)
-    MAX_WEEKLY_LOSS = -0.25  # -25% (was -5%)
+    MAX_DAILY_LOSS = -0.03  # Tighten to -3% to strictly preserve capital
+    MAX_WEEKLY_LOSS = -0.10  # Tighten to -10%
     MAX_DRAWDOWN = -0.20  # -20% (was -4%)
     MAX_LEVERAGE = 10.0  # 10x (was 2x)
     MARGIN_BUFFER = 0.05  # 5% safety margin
@@ -34,7 +35,7 @@ class TradingConfig:
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE
     # ============================================================================
     HARDSTOP_PCT = 0.02  # 2% hard stop loss on any single trade
-    MAX_HOLD_TIME_MINUTES = 240  # 4 hours
+    MAX_HOLD_TIME_MINUTES = 120  # Reduce to 2 hours to improve capital turnover
     
     # ============================================================================
     # ACCOUNT SETTINGS
@@ -55,8 +56,8 @@ ChronosX Trading Config
 ======================
 Mode: ALPHA (force_execute=true)
 Min Confidence: {min_conf}
-Max Position: ${max_pos} USDT
-Kelly Fraction: {kelly}
+Max Position: {max_pos_pct}% of Equity
+Kelly Fraction: {kelly_frac}
 Max Daily Loss: {daily}%
 Max Weekly Loss: {weekly}%
 Trade in Choppy: {choppy}
@@ -64,8 +65,8 @@ Hard Stop Pct: {hardstop}%
 Max Hold Time: {hold_time} mins
 """.format(
             min_conf=cls.MIN_CONFIDENCE,
-            max_pos=cls.MAX_POSITION_SIZE,
-            kelly=cls.KELLY_FRACTION,
+            max_pos_pct=cls.MAX_POSITION_AS_PCT_EQUITY * 100,
+            kelly_frac=cls.KELLY_FRACTION,
             daily=cls.MAX_DAILY_LOSS * 100,
             weekly=cls.MAX_WEEKLY_LOSS * 100,
             choppy="DISABLED" if not cls.TRADE_IN_CHOPPY_REGIME else "ENABLED",

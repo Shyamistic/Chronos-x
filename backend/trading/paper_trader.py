@@ -336,9 +336,9 @@ class PaperTrader:
 
             side = "buy" if ensemble_decision.direction > 0 else "sell"
 
-            # Position sizing based on config
-            # Use a fraction of the max position size, scaled by confidence
-            base_size_usdt = self.config.MAX_POSITION_SIZE * self.config.KELLY_FRACTION
+            # DYNAMIC POSITION SIZING: Base size on a % of current equity
+            max_pos_usdt = self.equity * self.config.MAX_POSITION_AS_PCT_EQUITY
+            base_size_usdt = max_pos_usdt * self.config.KELLY_FRACTION
             scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
             size_in_btc = scaled_size_usdt / candle.close
             
