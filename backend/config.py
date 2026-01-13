@@ -59,7 +59,7 @@ class TradingConfig:
     # ============================================================================
     # REGIME-AWARE TRADING
     # ============================================================================
-    TRADE_IN_CHOPPY_REGIME = False  # ✅ NEW: Disable trading in choppy markets
+    TRADE_IN_CHOPPY_REGIME = True  # ✅ COMPETITION: Enable trading in chop to ensure activity
     
     @property
     def MAX_POSITION_SIZE(self):
