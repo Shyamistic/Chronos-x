@@ -499,7 +499,6 @@ class PaperTrader:
         return True
 
     def _close_position(self, symbol: str, exit_price: float, timestamp: datetime, exit_reason: str = "unknown"):
-        position_to_close = self.open_positions.pop(symbol, None)
         # Peek at the position first; do not remove until execution is confirmed
         position_to_close = self.open_positions.get(symbol)
         if not position_to_close:
@@ -557,7 +556,7 @@ class PaperTrader:
                 return
 
         # Execution successful (or not required), now safe to remove from ledger
-        self.open_positions.pop(symbol)
+        self.open_positions.pop(symbol, None)
         self.trades.append(trade)
         self.balance += pnl
         self.total_pnl += pnl

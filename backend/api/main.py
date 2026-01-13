@@ -121,6 +121,49 @@ async def control_live_trading(action: Dict):
         }
 
 
+@app.post("/trading/panic-close")
+async def panic_close_all():
+    """
+    EMERGENCY: Immediately attempts to close all open positions on WEEX.
+    """
+    from backend.trading.weex_client import WeexClient
+    
+    def _sync_close():
+        client = WeexClient()
+        results = []
+        try:
+            resp = client.get_open_positions()
+            positions = []
+            if isinstance(resp, dict) and "data" in resp:
+                data = resp["data"]
+                if isinstance(data, list): positions = data
+                elif isinstance(data, dict) and "lists" in data: positions = data["lists"]
+            
+            for pos in positions:
+                symbol = pos.get("symbol")
+                side_raw = str(pos.get("side", ""))
+                size = str(pos.get("holdAmount") or pos.get("size") or 0)
+                if float(size) <= 0: continue
+                
+                close_type = "3" if side_raw == "1" else "4"
+                
+                try:
+                    # Market close
+                    res = client.place_order(
+                        symbol=symbol, size=size, type_=close_type, 
+                        price="0", match_price="1"
+                    )
+                    results.append({"symbol": symbol, "status": "closed", "response": res})
+                except Exception as e:
+                    results.append({"symbol": symbol, "status": "failed", "error": str(e)})
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+        return {"status": "completed", "results": results}
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _sync_close)
+
+
 @app.get("/trading/live-status")
 async def get_trading_status() -> Dict[str, Any]:
     """Check if trading loop is running and get basic status."""
