@@ -25,17 +25,21 @@ def close_all():
 
     print("Fetching open positions...")
     positions = []
-    try:
-        # Try fetching global positions with a few retries
-        for i in range(3):
-            try:
-                resp = client.get_open_positions()
-                if resp: break # Success
-            except Exception as e:
-                print(f"Attempt {i+1}: Failed to fetch global positions: {e}. Retrying...")
-                time.sleep(2 ** i) # Exponential backoff
-        if not resp:
-            print("Failed to fetch global positions after retries. Switching to per-symbol check.")
+    resp = None # Initialize resp to None
+    
+    # Try fetching global positions with a few retries
+    for i in range(3):
+        try:
+            resp = client.get_open_positions()
+            if resp: break # Success, break out of retry loop
+        except Exception as e:
+            print(f"Attempt {i+1}: Failed to fetch global positions: {e}. Retrying...")
+            time.sleep(2 ** i) # Exponential backoff
+    
+    if not resp: # If resp is still None after retries
+        print("Failed to fetch global positions after retries. Switching to per-symbol check.")
+
+    # Process the response if it was successful
     if resp and isinstance(resp, dict) and "data" in resp:
         data = resp["data"]
         if isinstance(data, list):
