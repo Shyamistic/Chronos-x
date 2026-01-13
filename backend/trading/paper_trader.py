@@ -281,8 +281,8 @@ class PaperTrader:
                 print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to z-score ({z_score:.2f}).")
                 self.current_regime = forced_regime
             else:
-                print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to REVERSAL due to weak z-score ({z_score:.2f}).")
-                self.current_regime = MarketRegime("reversal") # Access enum member by its value string
+                print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to CHOP due to weak z-score ({z_score:.2f}).")
+                self.current_regime = MarketRegime("chop") # Use CHOP as a safe, tradable fallback
         else:
             # Use the detector's classification if it's not UNKNOWN, or if not in aggressive competition mode.
             self.current_regime = regime_state.current
