@@ -212,7 +212,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         # --- RECONCILIATION START ---
         print("[WeexTradingLoop] Fetching open positions from WEEX for reconciliation...")
         if hasattr(self.client, "get_open_positions"):
-            for attempt in range(3):
+            while True:  # Retry indefinitely on startup
                 try:
                     # Fetch positions (generic fetch, not specific to one symbol if possible)
                     resp = self.client.get_open_positions(symbol=None)
@@ -229,11 +229,9 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                         print("[WeexTradingLoop] No open positions found on exchange.")
                     break # Success, exit retry loop
                 except Exception as e:
-                    print(f"[WeexTradingLoop] Reconciliation attempt {attempt+1} failed: {e}")
-                    if attempt < 2:
-                        await asyncio.sleep(2)
-                    else:
-                        print("[WeexTradingLoop] CRITICAL: Reconciliation failed after retries. Proceeding with empty state.")
+                    print(f"[WeexTradingLoop] Reconciliation failed: {e}. Retrying in 5s...")
+                    await asyncio.sleep(5)
+
         # --- RECONCILIATION END ---
 
         tasks = [self._run_for_symbol(symbol) for symbol in self.symbols]

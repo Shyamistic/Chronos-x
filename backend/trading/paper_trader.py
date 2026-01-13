@@ -604,6 +604,7 @@ class PaperTrader:
             entry_price = float(pos.get("averageOpenPrice", 0) or pos.get("openPrice", 0))
             
             if symbol in self.open_positions:
+                print(f"[PaperTrader] WARNING: Duplicate position for {symbol} found during reconciliation. Keeping existing, ignoring {side} {size}.")
                 continue
                 
             print(f"[PaperTrader] Adopting orphan position: {symbol} {side} {size} @ {entry_price}")
