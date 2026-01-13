@@ -210,6 +210,22 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         print(f"[WeexTradingLoop] Starting live trading for symbols: {self.symbols}")
 
         # --- RECONCILIATION START ---
+        print("[WeexTradingLoop] Fetching open positions from WEEX for reconciliation...")
+        if hasattr(self.client, "get_open_positions"):
+            for attempt in range(3):
+                try:
+                    # Fetch positions (generic fetch, not specific to one symbol if possible)
+                    resp = self.client.get_open_positions(symbol=None)
+                    positions = []
+                    if isinstance(resp, dict) and "data" in resp:
+                        # Handle WEEX response format (often data is a list or data['lists'])
+                        data = resp["data"]
+                        if isinstance(data, list): positions = data
+                        elif isinstance(data, dict) and "lists" in data: positions = data["lists"]
+                    
+                    if positions:
+                        self.paper_trader.reconcile_positions(positions)
+                    else:
                         print("[WeexTradingLoop] No open positions found on exchange.")
                     break # Success, exit retry loop
                 except Exception as e:
