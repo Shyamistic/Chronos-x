@@ -51,6 +51,7 @@ class TradeRecord:
     ensemble_confidence: float = 0.0
     order_id: Optional[str] = None
     highest_pnl_pct: float = 0.0
+    exit_reason: str = "unknown"
 
     def __post_init__(self):
         if self.contributing_agents is None:
@@ -319,7 +320,7 @@ class PaperTrader:
             should_exit, exit_reason = self._should_exit(self.open_position, candle, ensemble_decision)
             if should_exit:
                 print(f"[PaperTrader] EXIT TRIGGERED: {exit_reason}")
-                self._close_position(exit_price=candle.close, timestamp=candle.timestamp)
+                self._close_position(exit_price=candle.close, timestamp=candle.timestamp, exit_reason=exit_reason)
                 # IMPORTANT: Return after closing to avoid immediate re-entry on the same candle
                 return
 
@@ -391,6 +392,7 @@ class PaperTrader:
                 contributing_agents=[s.agent_id for s in ensemble_decision.agent_signals],
                 ensemble_confidence=ensemble_decision.confidence,
                 stop_loss=trading_signal.stop_loss,
+                exit_reason="open",  # Placeholder until closed
             )
             print(
                 f"[PaperTrader] Opened position side={side}, size={final_size:.6f}, "
@@ -413,6 +415,7 @@ class PaperTrader:
         contributing_agents: List[str] = None,
         ensemble_confidence: float = 0.0,
         stop_loss: float = 0.0,
+        exit_reason: str = "open",
     ):
         self.open_position = TradeRecord(
             timestamp=timestamp,
@@ -429,6 +432,7 @@ class PaperTrader:
             contributing_agents=contributing_agents or [],
             ensemble_confidence=ensemble_confidence,
             order_id=str(uuid.uuid4()),
+            exit_reason=exit_reason,
         )
 
         # EXECUTION: Send order to WEEX if client is connected
@@ -437,20 +441,21 @@ class PaperTrader:
                 # Map side to WEEX type: 1=Open Long, 2=Open Short
                 order_type = "1" if side == "buy" else "2"
                 print(f"[PaperTrader] EXECUTION: Placing {side} order for {size:.4f} BTC...")
-                self.execution_client.place_order(
+                response = self.execution_client.place_order(
                     symbol=self.symbol,
                     size=str(size),
                     type_=order_type,
                     price=str(price),
                     client_order_id=self.open_position.order_id
                 )
+                print(f"[PaperTrader] EXECUTION SUCCESS: Order placed. Response: {response}")
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR: {e}")
                 # CRITICAL: Rollback internal state if execution fails
                 self.open_position = None
                 return
 
-    def _close_position(self, exit_price: float, timestamp: datetime):
+    def _close_position(self, exit_price: float, timestamp: datetime, exit_reason: str = "unknown"):
         if not self.open_position:
             return
 
@@ -477,6 +482,7 @@ class PaperTrader:
             ensemble_confidence=self.open_position.ensemble_confidence,
             order_id=self.open_position.order_id,
             highest_pnl_pct=self.open_position.highest_pnl_pct,
+            exit_reason=exit_reason,
         )
 
         # NEW: hook external monitor if set (ensure dict is passed)
@@ -490,12 +496,13 @@ class PaperTrader:
                 # Note: If open was 'buy' (Long), we need to Close Long (3).
                 close_type = "3" if self.open_position.side == "buy" else "4"
                 print(f"[PaperTrader] EXECUTION: Closing {self.open_position.side} position...")
-                self.execution_client.place_order(
+                response = self.execution_client.place_order(
                     symbol=self.symbol,
                     size=str(self.open_position.size),
                     type_=close_type,
                     price=str(exit_price),
                 )
+                print(f"[PaperTrader] EXECUTION SUCCESS: Position closed. Response: {response}")
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR (Close): {e}")
 
@@ -516,7 +523,7 @@ class PaperTrader:
 
         print(
             f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "
-            f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}, total_pnl={self.total_pnl:.4f}"
+            f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}, total_pnl={self.total_pnl:.4f}, reason='{exit_reason}'"
         )
 
         self.open_position = None
@@ -568,6 +575,7 @@ class PaperTrader:
                     "regime",
                     "contributing_agents",
                     "ensemble_confidence",
+                    "exit_reason",
                 ]
             )
         records = []
