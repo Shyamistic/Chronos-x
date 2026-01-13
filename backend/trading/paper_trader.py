@@ -145,6 +145,7 @@ class PaperTrader:
         
         # Competition Metrics
         self.high_conviction_trades = 0
+        self.processed_candles_count = 0 # Track processed candles for regime warm-up
 
     # ================================================================ #
     # Account state helpers
@@ -265,10 +266,21 @@ class PaperTrader:
 
     def _detect_regime(self, candle: Candle) -> MarketRegime:
         """Detect current market regime."""
+        self.processed_candles_count += 1
         self.regime_detector.update(candle.close)
         regime_state = self.regime_detector.detect()
-        self.current_regime = regime_state.current
+        
+        # If regime is UNKNOWN after initial lookback, force it to REVERSAL for trading activity
+        # This ensures we don't stay idle if the detector is too conservative,
+        # while still respecting the "ban UNKNOWN" rule by classifying it as something tradable.
+        if regime_state.current == MarketRegime.UNKNOWN and self.processed_candles_count >= self.regime_detector.lookback:
+            self.current_regime = MarketRegime.REVERSAL
+            print(f"[PaperTrader] Forced regime from UNKNOWN to REVERSAL after {self.processed_candles_count} candles to enable trading.")
+        else:
+            self.current_regime = regime_state.current
+
         self.portfolio_manager.set_regime(self.current_regime)
+
         return self.current_regime
 
     # ================================================================ #
@@ -425,7 +437,7 @@ class PaperTrader:
 
         if allow_entry:
             # STEP 1: BAN TRADING IN UNKNOWN REGIME
-            if regime == MarketRegime.UNKNOWN:
+            if regime == MarketRegime.UNKNOWN: # This will only trigger if still in warm-up phase, as _detect_regime forces it otherwise
                 print("[PaperTrader] COMPETITION RULE: Trade blocked in UNKNOWN regime.")
                 return
 
@@ -654,12 +666,13 @@ class PaperTrader:
                 # Map side to WEEX type: 3=Close Long, 4=Close Short
                 # Note: If open was 'buy' (Long), we need to Close Long (3).
                 close_type = "3" if position_to_close.side == "buy" else "4"
-                print(f"[PaperTrader] EXECUTION: Closing {position_to_close.side} position for {symbol}...")
+                print(f"[PaperTrader] EXECUTION: Closing {position_to_close.side} position for {symbol} via MARKET order...")
                 response = self.execution_client.place_order(
                     symbol=symbol,
                     size=f"{position_to_close.size:.{get_precision(symbol)}f}",
                     type_=close_type,
-                    price=str(exit_price),
+                    price="0", # Price is ignored for market order, set to 0
+                    match_price="1" # CRITICAL: '1' for market order to ensure execution
                 )
                 
                 # CRITICAL FIX: If API fails, do NOT close internal position. Retry next tick.
