@@ -129,36 +129,56 @@ async def panic_close_all():
     from backend.trading.weex_client import WeexClient
     
     def _sync_close():
-        client = WeexClient()
-        results = []
         try:
-            resp = client.get_open_positions()
+            client = WeexClient()
+            results = []
+            FALLBACK_SYMBOLS = ["cmt_btcusdt", "cmt_ethusdt", "cmt_solusdt"]
             positions = []
-            if isinstance(resp, dict) and "data" in resp:
-                data = resp["data"]
-                if isinstance(data, list): positions = data
-                elif isinstance(data, dict) and "lists" in data: positions = data["lists"]
             
+            try:
+                resp = client.get_open_positions()
+                if resp and isinstance(resp, dict) and "data" in resp:
+                    data = resp["data"]
+                    if isinstance(data, list): positions = data
+                    elif isinstance(data, dict) and "lists" in data: positions = data["lists"]
+            except Exception as e:
+                print(f"Global fetch failed: {e}")
+                
+            # If global fetch failed or returned nothing, try per-symbol
+            if not positions:
+                for sym in FALLBACK_SYMBOLS:
+                    try:
+                        p_resp = client.get_open_positions(symbol=sym)
+                        if p_resp and "data" in p_resp:
+                            d = p_resp["data"]
+                            if isinstance(d, list): positions.extend(d)
+                            elif isinstance(d, dict) and "lists" in d: positions.extend(d["lists"])
+                    except Exception as e_sym:
+                        print(f"Per-symbol fetch for {sym} failed: {e_sym}")
+            
+            if not positions:
+                return {"status": "completed", "message": "No open positions found to close.", "results": []}
+
             for pos in positions:
                 symbol = pos.get("symbol")
                 side_raw = str(pos.get("side", ""))
                 size = str(pos.get("holdAmount") or pos.get("size") or 0)
-                if float(size) <= 0: continue
+                if not symbol or float(size) <= 0:
+                    continue
                 
                 close_type = "3" if side_raw == "1" else "4"
                 
                 try:
                     # Market close
-                    res = client.place_order(
-                        symbol=symbol, size=size, type_=close_type, 
-                        price="0", match_price="1"
-                    )
+                    res = client.place_order(symbol=symbol, size=size, type_=close_type, price="0", match_price="1")
                     results.append({"symbol": symbol, "status": "closed", "response": res})
                 except Exception as e:
                     results.append({"symbol": symbol, "status": "failed", "error": str(e)})
+            
+            return {"status": "completed", "results": results}
+
         except Exception as e:
-            return {"status": "error", "message": str(e)}
-        return {"status": "completed", "results": results}
+            return {"status": "error", "message": f"An unexpected error occurred in panic close: {e}"}
 
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _sync_close)

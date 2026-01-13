@@ -12,15 +12,18 @@ def close_all():
     print("Initializing WEEX Client...")
     client = WeexClient()
     
+    # Fallback symbols if API fails to list positions
+    FALLBACK_SYMBOLS = ["cmt_btcusdt", "cmt_ethusdt", "cmt_solusdt"]
+    
     print("Fetching open positions...")
     try:
         resp = client.get_open_positions()
     except Exception as e:
-        print(f"Failed to fetch positions: {e}")
-        return
+        print(f"Failed to fetch global positions: {e}. Switching to per-symbol check.")
+        resp = None
 
     positions = []
-    if isinstance(resp, dict) and "data" in resp:
+    if resp and isinstance(resp, dict) and "data" in resp:
         data = resp["data"]
         if isinstance(data, list):
             positions = data
@@ -28,7 +31,23 @@ def close_all():
             positions = data["lists"]
     
     if not positions:
-        print("No open positions found.")
+        print("No global positions found. Checking fallback symbols individually...")
+        for sym in FALLBACK_SYMBOLS:
+            try:
+                print(f"Checking {sym}...")
+                # Try fetching specific symbol position
+                p_resp = client.get_open_positions(symbol=sym)
+                if p_resp and "data" in p_resp:
+                    d = p_resp["data"]
+                    if isinstance(d, list):
+                        positions.extend(d)
+                    elif isinstance(d, dict) and "lists" in d:
+                        positions.extend(d["lists"])
+            except Exception as ex:
+                print(f"Failed to fetch {sym}: {ex}")
+
+    if not positions:
+        print("No open positions found after exhaustive search.")
         return
 
     print(f"Found {len(positions)} open positions.")

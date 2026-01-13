@@ -182,16 +182,6 @@ class PaperTrader:
         self, position: TradeRecord, candle: Candle, ensemble_decision: Any
     ) -> Tuple[bool, Optional[str]]:
         """Check if a position should be closed based on multiple exit triggers."""
-
-        # Exit Trigger 1: Opposing Signal from Ensemble
-        if ensemble_decision:
-            is_long = position.side == "buy"
-            is_short = position.side == "sell"
-            if (is_long and ensemble_decision.direction == -1) or (
-                is_short and ensemble_decision.direction == 1
-            ):
-                return True, f"Opposing signal (conf: {ensemble_decision.confidence:.2f})"
-
         # Calculate PnL for Exits
         entry_price = position.entry_price
         current_price = candle.close
@@ -337,54 +327,54 @@ class PaperTrader:
         self.last_ensemble_decision = ensemble_decision
         self.last_regime = regime
 
-        # --- 1. EXIT LOGIC ---
-        position_to_check = self.open_positions.get(candle.symbol)
-        if position_to_check:
+        # --- POSITION MANAGEMENT LOGIC ---
+        current_position = self.open_positions.get(candle.symbol)
+        new_direction = ensemble_decision.direction
+
+        # 1. Handle Signal Flips: Close opposing positions first.
+        if current_position and new_direction != 0:
+            is_long = current_position.side == 'buy'
+            if (is_long and new_direction == -1) or (not is_long and new_direction == 1):
+                print(f"[PaperTrader] SIGNAL FLIP: Closing {current_position.side} position for {candle.symbol}.")
+                self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason="signal_flip")
+
+        # 2. Handle Exits (SL, TP, etc.) if a position is still open.
+        # Re-check self.open_positions as it might have been closed by the flip logic.
+        if candle.symbol in self.open_positions:
+            position_to_check = self.open_positions[candle.symbol]
             should_exit, exit_reason = self._should_exit(position_to_check, candle, ensemble_decision)
             if should_exit:
                 print(f"[PaperTrader] EXIT TRIGGERED: {exit_reason}")
                 self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason=exit_reason)
-                # IMPORTANT: Return after closing to avoid immediate re-entry on the same candle
-                return
+                return # Stop processing for this candle after a SL/TP exit.
 
-        # --- 2. ENTRY LOGIC (only if no open position) ---
+        # 3. Handle Entries if no position is currently open for the symbol.
         if candle.symbol not in self.open_positions:
-            if ensemble_decision.direction == 0:
+            if new_direction == 0:
                 print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
                 return
 
             if ensemble_decision.confidence < self.config.MIN_CONFIDENCE:
                 print(f"[PaperTrader] Confidence {ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE} -> no trade")
                 return
-
-            side = "buy" if ensemble_decision.direction > 0 else "sell"
-
+            
+            side = "buy" if new_direction > 0 else "sell"
             # DYNAMIC POSITION SIZING: Base size on a % of current equity, divided among potential symbols
             max_pos_usdt = self.equity * self.config.MAX_POSITION_AS_PCT_EQUITY
             base_size_usdt = max_pos_usdt * self.config.KELLY_FRACTION
             scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
-            size_in_btc = scaled_size_usdt / candle.close
+            size = scaled_size_usdt / candle.close
             
-            # QUANTIZATION FIX: Enforce WEEX contract step size per symbol
-            step_size = STEP_SIZES.get(candle.symbol, 0.0001)
-            # Round to nearest step, ensure at least 1 step if we are trading
-            size_in_btc = max(step_size, round(size_in_btc / step_size) * step_size)
-            
-            # Dynamic rounding precision based on step size
-            precision = int(abs(math.log10(step_size))) if step_size < 1 else 0
-            size_in_btc = round(size_in_btc, precision)
-
             trading_signal = TradingSignal(
                 symbol=candle.symbol,
                 side=side,
-                size=size_in_btc,
+                size=size,
                 confidence=ensemble_decision.confidence,
                 stop_loss=candle.close * self.config.HARDSTOP_PCT, # Stop loss distance
                 take_profit=candle.close * self.config.HARDSTOP_PCT * 2, # Simple 2:1 R:R
                 timestamp=candle.timestamp,
                 agent_id="ensemble",
             )
-
             # Governance check
             account_state = self._get_account_state()
             decision: GovernanceDecision = self.governance.evaluate(
@@ -395,17 +385,13 @@ class PaperTrader:
                 f"adj_size={decision.adjusted_size:.6f}, "
                 f"risk_score={decision.risk_score:.1f}, reason={decision.reason}"
             )
-
             self._log_governance_trigger(
                 candle.timestamp, trading_signal, decision, regime
             )
-
             if not decision.allow or decision.adjusted_size <= 0:
                 print("[PaperTrader] Trade blocked by governance or zero size")
                 return
-
             final_size = decision.adjusted_size
-
             # Open new position
             success = self._open_position(
                 symbol=candle.symbol,
