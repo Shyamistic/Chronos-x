@@ -148,6 +148,18 @@ class WeexClient:
             auth=False,
         )
 
+    def get_open_positions(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """Fetch open positions from WEEX."""
+        params = {}
+        if symbol:
+            params["symbol"] = symbol
+        return self._request(
+            "GET",
+            "/capi/v2/position/openPositions",
+            params=params,
+            auth=True,
+        )
+
     # ------------------------------------------------------------------
     # Trading endpoints (auth required)
     # ------------------------------------------------------------------

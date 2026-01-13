@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Any
 import logging
 import uuid
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,27 @@ from backend.governance.rule_engine import (
 )
 from backend.config import TradingConfig
 
+
+# WEEX Contract Step Sizes (Hardcoded for competition)
+STEP_SIZES = {
+    "cmt_btcusdt": 0.0001,
+    "cmt_ethusdt": 0.001,
+    "cmt_solusdt": 0.1,
+}
+
+def normalize_size(symbol: str, size: float) -> float:
+    step_size = STEP_SIZES.get(symbol, 0.0001)
+    if size < step_size:
+        return 0.0
+    # Floor to nearest step
+    quantized_size = math.floor(size / step_size) * step_size
+    # Fix floating point precision
+    precision = int(abs(math.log10(step_size))) if step_size < 1 else 0
+    return round(quantized_size, precision)
+
+def get_precision(symbol: str) -> int:
+    step_size = STEP_SIZES.get(symbol, 0.0001)
+    return int(abs(math.log10(step_size))) if step_size < 1 else 0
 
 @dataclass
 class TradeRecord:
@@ -343,11 +365,14 @@ class PaperTrader:
             scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
             size_in_btc = scaled_size_usdt / candle.close
             
-            # QUANTIZATION FIX: Enforce WEEX contract step size (0.0001 BTC)
-            step_size = 0.0001
+            # QUANTIZATION FIX: Enforce WEEX contract step size per symbol
+            step_size = STEP_SIZES.get(candle.symbol, 0.0001)
             # Round to nearest step, ensure at least 1 step if we are trading
             size_in_btc = max(step_size, round(size_in_btc / step_size) * step_size)
-            size_in_btc = round(size_in_btc, 4) # Prevent float precision errors
+            
+            # Dynamic rounding precision based on step size
+            precision = int(abs(math.log10(step_size))) if step_size < 1 else 0
+            size_in_btc = round(size_in_btc, precision)
 
             trading_signal = TradingSignal(
                 symbol=candle.symbol,
@@ -382,7 +407,7 @@ class PaperTrader:
             final_size = decision.adjusted_size
 
             # Open new position
-            self._open_position(
+            success = self._open_position(
                 symbol=candle.symbol,
                 side=side,
                 size=final_size,
@@ -396,10 +421,11 @@ class PaperTrader:
                 stop_loss=trading_signal.stop_loss,
                 exit_reason="open",  # Placeholder until closed
             )
-            print(
-                f"[PaperTrader] Opened position side={side}, size={final_size:.6f}, "
-                f"price={candle.close}"
-            )
+            if success:
+                print(
+                    f"[PaperTrader] Opened position side={side}, size={final_size:.6f}, "
+                    f"price={candle.close}"
+                )
 
     # ================================================================ #
     # Position management
@@ -419,12 +445,44 @@ class PaperTrader:
         ensemble_confidence: float = 0.0,
         stop_loss: float = 0.0,
         exit_reason: str = "open",
-    ):
+    ) -> bool:
+        # Generate order ID first
+        order_id = str(uuid.uuid4())
+
+        # Quantize size to ensure WEEX acceptance
+        final_size = normalize_size(symbol, size)
+        if final_size <= 0:
+            print(f"[PaperTrader] Size {size} too small for {symbol} (step {STEP_SIZES.get(symbol)}). Skipping.")
+            return False
+
+        # EXECUTION: Send order to WEEX if client is connected
+        # CRITICAL FIX: Only record position internally if execution succeeds
+        if self.execution_client:
+            try:
+                # Map side to WEEX type: 1=Open Long, 2=Open Short
+                order_type = "1" if side == "buy" else "2"
+                print(f"[PaperTrader] EXECUTION: Placing {side} order for {final_size} {symbol}...")
+                response = self.execution_client.place_order(
+                    symbol=symbol,
+                    size=str(final_size),
+                    size=f"{final_size:.{get_precision(symbol)}f}",
+                    type_=order_type,
+                    price=str(price),
+                    client_order_id=order_id
+                )
+                if isinstance(response, dict) and response.get("code") and response["code"] != "00000":
+                    print(f"[PaperTrader] EXECUTION API ERROR: {response}")
+                    return False
+                print(f"[PaperTrader] EXECUTION SUCCESS: Order placed. Response: {response}")
+            except Exception as e:
+                print(f"[PaperTrader] EXECUTION ERROR: {e}")
+                return False
+
         new_position = TradeRecord(
             timestamp=timestamp,
             symbol=symbol,
             side=side,
-            size=size,
+            size=final_size,
             entry_price=price,
             exit_price=price,
             pnl=0.0,
@@ -434,34 +492,17 @@ class PaperTrader:
             regime=regime,
             contributing_agents=contributing_agents or [],
             ensemble_confidence=ensemble_confidence,
-            order_id=str(uuid.uuid4()),
+            order_id=order_id,
             exit_reason=exit_reason,
         )
         
         self.open_positions[symbol] = new_position
-
-        # EXECUTION: Send order to WEEX if client is connected
-        if self.execution_client:
-            try:
-                # Map side to WEEX type: 1=Open Long, 2=Open Short
-                order_type = "1" if side == "buy" else "2"
-                print(f"[PaperTrader] EXECUTION: Placing {side} order for {size:.4f} BTC...")
-                response = self.execution_client.place_order(
-                    symbol=symbol,
-                    size=str(size),
-                    type_=order_type,
-                    price=str(price),
-                    client_order_id=new_position.order_id
-                )
-                print(f"[PaperTrader] EXECUTION SUCCESS: Order placed. Response: {response}")
-            except Exception as e:
-                print(f"[PaperTrader] EXECUTION ERROR: {e}")
-                # CRITICAL: Rollback internal state if execution fails
-                self.open_positions.pop(symbol, None)
-                return
+        return True
 
     def _close_position(self, symbol: str, exit_price: float, timestamp: datetime, exit_reason: str = "unknown"):
         position_to_close = self.open_positions.pop(symbol, None)
+        # Peek at the position first; do not remove until execution is confirmed
+        position_to_close = self.open_positions.get(symbol)
         if not position_to_close:
             logger.warning(f"Attempted to close a position for {symbol}, but none was open.")
             return
@@ -502,13 +543,23 @@ class PaperTrader:
                 response = self.execution_client.place_order(
                     symbol=symbol,
                     size=str(position_to_close.size),
+                    size=f"{position_to_close.size:.{get_precision(symbol)}f}",
                     type_=close_type,
                     price=str(exit_price),
                 )
+                
+                # CRITICAL FIX: If API fails, do NOT close internal position. Retry next tick.
+                if isinstance(response, dict) and response.get("code") and response["code"] != "00000":
+                    print(f"[PaperTrader] EXECUTION API ERROR (Close): {response}")
+                    return
+
                 print(f"[PaperTrader] EXECUTION SUCCESS: Position closed. Response: {response}")
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR (Close): {e}")
+                return
 
+        # Execution successful (or not required), now safe to remove from ledger
+        self.open_positions.pop(symbol)
         self.trades.append(trade)
         self.balance += pnl
         self.total_pnl += pnl
@@ -528,6 +579,50 @@ class PaperTrader:
             f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "
             f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}, total_pnl={self.total_pnl:.4f}, reason='{exit_reason}'"
         )
+
+    def reconcile_positions(self, external_positions: List[Dict[str, Any]]):
+        """
+        Sync internal state with actual exchange positions on startup.
+        """
+        print(f"[PaperTrader] Reconciling {len(external_positions)} external positions...")
+        for pos in external_positions:
+            symbol = pos.get("symbol")
+            if not symbol: continue
+            
+            # WEEX specific field mapping
+            # Try 'holdAmount' (common) or 'size'
+            size = float(pos.get("holdAmount", 0) or pos.get("size", 0))
+            if size <= 0: continue
+            
+            # Determine side: 1=long, 2=short usually
+            side_raw = str(pos.get("side", "")).lower()
+            if "long" in side_raw or side_raw == "1":
+                side = "buy"
+            elif "short" in side_raw or side_raw == "2":
+                side = "sell"
+            else:
+                continue # Unknown side
+
+            entry_price = float(pos.get("averageOpenPrice", 0) or pos.get("openPrice", 0))
+            
+            if symbol in self.open_positions:
+                continue
+                
+            print(f"[PaperTrader] Adopting orphan position: {symbol} {side} {size} @ {entry_price}")
+            self.open_positions[symbol] = TradeRecord(
+                timestamp=datetime.now(), # Unknown original time
+                symbol=symbol,
+                side=side,
+                size=size,
+                entry_price=entry_price,
+                exit_price=entry_price,
+                pnl=0.0,
+                agent_id="manual_recovery",
+                governance_reason="Startup Reconciliation",
+                risk_score=0.0,
+                regime="unknown",
+                exit_reason="open"
+            )
 
     # ================================================================ #
     # Governance tracking

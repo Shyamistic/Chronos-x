@@ -209,6 +209,25 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         self.running = True
         print(f"[WeexTradingLoop] Starting live trading for symbols: {self.symbols}")
 
+        # --- RECONCILIATION START ---
+        try:
+            print("[WeexTradingLoop] Fetching open positions from WEEX for reconciliation...")
+            if hasattr(self.client, "get_open_positions"):
+                # Fetch positions (generic fetch, not specific to one symbol if possible)
+                resp = self.client.get_open_positions(symbol=None)
+                positions = []
+                if isinstance(resp, dict) and "data" in resp:
+                    # Handle WEEX response format (often data is a list or data['lists'])
+                    data = resp["data"]
+                    if isinstance(data, list): positions = data
+                    elif isinstance(data, dict) and "lists" in data: positions = data["lists"]
+                
+                if positions:
+                    self.paper_trader.reconcile_positions(positions)
+        except Exception as e:
+            print(f"[WeexTradingLoop] Reconciliation warning: {e}")
+        # --- RECONCILIATION END ---
+
         tasks = [self._run_for_symbol(symbol) for symbol in self.symbols]
         await asyncio.gather(*tasks)
 
