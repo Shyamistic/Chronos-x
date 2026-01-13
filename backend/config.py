@@ -14,7 +14,7 @@ class TradingConfig:
     # ============================================================================
     MIN_CONFIDENCE = 0.24  # Loosen to allow more confident trades from the ensemble
     MAX_POSITION_AS_PCT_EQUITY = 0.50  # Enable dynamic sizing: max position is 50% of equity
-    KELLY_FRACTION = 0.25  # Define quarter-Kelly for sizing calculations
+    KELLY_FRACTION = 0.40  # Increase aggression for faster growth (from 0.25)
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================

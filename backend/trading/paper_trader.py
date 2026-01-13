@@ -61,11 +61,9 @@ class TradeRecord:
 class PaperTrader:
     def __init__(
         self,
-        symbol: str = "cmt_btcusdt",
         config: Optional[TradingConfig] = None,
         execution_client: Optional[Any] = None,
     ):
-        self.symbol = symbol
         self.config = config or TradingConfig()
         self.execution_client = execution_client
         initial_balance = self.config.ACCOUNT_EQUITY
@@ -105,7 +103,7 @@ class PaperTrader:
 
         # Trade tracking
         self.trades: List[TradeRecord] = []
-        self.open_position: Optional[TradeRecord] = None
+        self.open_positions: Dict[str, TradeRecord] = {}
         self.governance_trigger_log: List[dict] = []
 
         # Optional callback: will be set by API layer for monitor
@@ -119,15 +117,14 @@ class PaperTrader:
     # Account state helpers
     # ================================================================ #
 
-    def _update_equity(self, mark_price: float):
-        if self.open_position:
-            direction = 1 if self.open_position.side == "buy" else -1
-            pnl_unrealized = (
-                mark_price - self.open_position.entry_price
-            ) * direction * self.open_position.size
-        else:
-            pnl_unrealized = 0.0
-
+    def _update_equity(self, mark_price: float, symbol: str):
+        pnl_unrealized = 0.0
+        for pos in self.open_positions.values():
+            # Use the current candle's price only for the symbol being updated
+            current_price = mark_price if pos.symbol == symbol else pos.exit_price
+            direction = 1 if pos.side == "buy" else -1
+            pnl_unrealized += (current_price - pos.entry_price) * direction * pos.size
+            pos.exit_price = current_price # Update exit price for unrealized PnL calc
         self.equity = self.balance + pnl_unrealized
         self.max_equity = max(self.max_equity, self.equity)
         drawdown = (self.max_equity - self.equity) / self.max_equity
@@ -140,10 +137,9 @@ class PaperTrader:
             daily_pnl=self.daily_pnl,
             total_pnl=self.total_pnl,
             max_drawdown=self.max_drawdown,
-            open_positions=1 if self.open_position else 0,
-            open_position_value=(
-                self.open_position.size if self.open_position else 0.0
-            ),
+            open_positions=len(self.open_positions),
+            # Sum the value of all open positions
+            open_position_value=sum(pos.size for pos in self.open_positions.values()),
             daily_trades=len(self.trades),
             recent_win_rate=self._recent_win_rate(),
             volatility=self.volatility,
@@ -271,7 +267,7 @@ class PaperTrader:
         self.sentiment_agent.update(candle)
         self.order_flow_agent.reset_window()  # Or update with real flow data
         self.ml_agent.update(candle)  # Also update ML agent
-        self._update_equity(mark_price=candle.close)
+        self._update_equity(mark_price=candle.close, symbol=candle.symbol)
 
         # --- Generate Ensemble Decision (needed for both exits and entries) ---
         signals = []
@@ -316,16 +312,17 @@ class PaperTrader:
         self.last_regime = regime
 
         # --- 1. EXIT LOGIC ---
-        if self.open_position:
-            should_exit, exit_reason = self._should_exit(self.open_position, candle, ensemble_decision)
+        position_to_check = self.open_positions.get(candle.symbol)
+        if position_to_check:
+            should_exit, exit_reason = self._should_exit(position_to_check, candle, ensemble_decision)
             if should_exit:
                 print(f"[PaperTrader] EXIT TRIGGERED: {exit_reason}")
-                self._close_position(exit_price=candle.close, timestamp=candle.timestamp, exit_reason=exit_reason)
+                self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason=exit_reason)
                 # IMPORTANT: Return after closing to avoid immediate re-entry on the same candle
                 return
 
         # --- 2. ENTRY LOGIC (only if no open position) ---
-        if not self.open_position:
+        if candle.symbol not in self.open_positions:
             if ensemble_decision.direction == 0:
                 print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
                 return
@@ -336,7 +333,7 @@ class PaperTrader:
 
             side = "buy" if ensemble_decision.direction > 0 else "sell"
 
-            # DYNAMIC POSITION SIZING: Base size on a % of current equity
+            # DYNAMIC POSITION SIZING: Base size on a % of current equity, divided among potential symbols
             max_pos_usdt = self.equity * self.config.MAX_POSITION_AS_PCT_EQUITY
             base_size_usdt = max_pos_usdt * self.config.KELLY_FRACTION
             scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
@@ -349,7 +346,7 @@ class PaperTrader:
             size_in_btc = round(size_in_btc, 4) # Prevent float precision errors
 
             trading_signal = TradingSignal(
-                symbol=self.symbol,
+                symbol=candle.symbol,
                 side=side,
                 size=size_in_btc,
                 confidence=ensemble_decision.confidence,
@@ -382,6 +379,7 @@ class PaperTrader:
 
             # Open new position
             self._open_position(
+                symbol=candle.symbol,
                 side=side,
                 size=final_size,
                 price=candle.close,
@@ -405,6 +403,7 @@ class PaperTrader:
 
     def _open_position(
         self,
+        symbol: str,
         side: str,
         size: float,
         price: float,
@@ -417,9 +416,9 @@ class PaperTrader:
         stop_loss: float = 0.0,
         exit_reason: str = "open",
     ):
-        self.open_position = TradeRecord(
+        new_position = TradeRecord(
             timestamp=timestamp,
-            symbol=self.symbol,
+            symbol=symbol,
             side=side,
             size=size,
             entry_price=price,
@@ -434,6 +433,8 @@ class PaperTrader:
             order_id=str(uuid.uuid4()),
             exit_reason=exit_reason,
         )
+        
+        self.open_positions[symbol] = new_position
 
         # EXECUTION: Send order to WEEX if client is connected
         if self.execution_client:
@@ -442,46 +443,44 @@ class PaperTrader:
                 order_type = "1" if side == "buy" else "2"
                 print(f"[PaperTrader] EXECUTION: Placing {side} order for {size:.4f} BTC...")
                 response = self.execution_client.place_order(
-                    symbol=self.symbol,
+                    symbol=symbol,
                     size=str(size),
                     type_=order_type,
                     price=str(price),
-                    client_order_id=self.open_position.order_id
+                    client_order_id=new_position.order_id
                 )
                 print(f"[PaperTrader] EXECUTION SUCCESS: Order placed. Response: {response}")
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR: {e}")
                 # CRITICAL: Rollback internal state if execution fails
-                self.open_position = None
+                self.open_positions.pop(symbol, None)
                 return
 
-    def _close_position(self, exit_price: float, timestamp: datetime, exit_reason: str = "unknown"):
-        if not self.open_position:
+    def _close_position(self, symbol: str, exit_price: float, timestamp: datetime, exit_reason: str = "unknown"):
+        position_to_close = self.open_positions.pop(symbol, None)
+        if not position_to_close:
+            logger.warning(f"Attempted to close a position for {symbol}, but none was open.")
             return
 
-        direction = 1 if self.open_position.side == "buy" else -1
-        pnl = (
-            (exit_price - self.open_position.entry_price)
-            * direction
-            * self.open_position.size
-        )
+        direction = 1 if position_to_close.side == "buy" else -1
+        pnl = ((exit_price - position_to_close.entry_price) * direction * position_to_close.size)
 
         trade = TradeRecord(
             timestamp=timestamp,
-            symbol=self.open_position.symbol,
-            side=self.open_position.side,
-            size=self.open_position.size,
-            entry_price=self.open_position.entry_price,
+            symbol=position_to_close.symbol,
+            side=position_to_close.side,
+            size=position_to_close.size,
+            entry_price=position_to_close.entry_price,
             exit_price=exit_price,
             pnl=pnl,
-            agent_id=self.open_position.agent_id,
-            governance_reason=self.open_position.governance_reason,
-            risk_score=self.open_position.risk_score,
-            regime=self.open_position.regime,
-            contributing_agents=self.open_position.contributing_agents,
-            ensemble_confidence=self.open_position.ensemble_confidence,
-            order_id=self.open_position.order_id,
-            highest_pnl_pct=self.open_position.highest_pnl_pct,
+            agent_id=position_to_close.agent_id,
+            governance_reason=position_to_close.governance_reason,
+            risk_score=position_to_close.risk_score,
+            regime=position_to_close.regime,
+            contributing_agents=position_to_close.contributing_agents,
+            ensemble_confidence=position_to_close.ensemble_confidence,
+            order_id=position_to_close.order_id,
+            highest_pnl_pct=position_to_close.highest_pnl_pct,
             exit_reason=exit_reason,
         )
 
@@ -494,11 +493,11 @@ class PaperTrader:
             try:
                 # Map side to WEEX type: 3=Close Long, 4=Close Short
                 # Note: If open was 'buy' (Long), we need to Close Long (3).
-                close_type = "3" if self.open_position.side == "buy" else "4"
-                print(f"[PaperTrader] EXECUTION: Closing {self.open_position.side} position...")
+                close_type = "3" if position_to_close.side == "buy" else "4"
+                print(f"[PaperTrader] EXECUTION: Closing {position_to_close.side} position for {symbol}...")
                 response = self.execution_client.place_order(
-                    symbol=self.symbol,
-                    size=str(self.open_position.size),
+                    symbol=symbol,
+                    size=str(position_to_close.size),
                     type_=close_type,
                     price=str(exit_price),
                 )
@@ -525,8 +524,6 @@ class PaperTrader:
             f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "
             f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}, total_pnl={self.total_pnl:.4f}, reason='{exit_reason}'"
         )
-
-        self.open_position = None
 
     # ================================================================ #
     # Governance tracking

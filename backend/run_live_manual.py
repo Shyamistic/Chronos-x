@@ -8,12 +8,6 @@ from backend.trading.weex_live import WeexTradingLoop
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
 
-# Define the portfolio of symbols to trade
-SYMBOLS_TO_TRADE = [
-    "cmt_btcusdt",
-    "cmt_ethusdt",
-]
-
 async def main():
     print("Initializing ChronosX Live Trading...")
     
@@ -28,7 +22,7 @@ async def main():
     bot_loop = WeexTradingLoop(
         weex_client=client, 
         paper_trader=trader, 
-        symbols=SYMBOLS_TO_TRADE,
+        symbol="cmt_btcusdt",
         poll_interval=5.0
     )
     

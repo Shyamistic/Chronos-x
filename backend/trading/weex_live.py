@@ -138,20 +138,15 @@ class WeexTradingLoop:
         self,
         weex_client: WeexClient,
         paper_trader: PaperTrader,
-        symbol: str = "cmt_btcusdt",
+        symbols: List[str],
         poll_interval: float = 5.0,
         monitor=None,
     ):
         self.client = weex_client
         self.paper_trader = paper_trader
-        self.symbol = symbol
+        self.symbols = symbols
         self.monitor = monitor
-        self.streamer = WeexLiveStreamer(
-            weex_client=weex_client,
-            symbol=symbol,
-            granularity="1m",
-            poll_interval_sec=poll_interval,
-        )
+        self.poll_interval = poll_interval
 
         # Inject execution client into PaperTrader if not already set
         if not self.paper_trader.execution_client:
@@ -182,34 +177,43 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         )
         TradingConfig.print_config()
 
+    async def _run_for_symbol(self, symbol: str):
+        """The trading logic loop for a single symbol."""
+        streamer = WeexLiveStreamer(
+            weex_client=self.client,
+            symbol=symbol,
+            granularity="1m",
+            poll_interval_sec=self.poll_interval,
+        )
+        print(f"[WeexTradingLoop] Starting stream for {symbol}...")
+        try:
+            async for candle in streamer.stream_candles():
+                if not self.running:
+                    break
+                
+                # Add symbol to candle object if not present, for safety
+                if not hasattr(candle, 'symbol'):
+                    candle.symbol = symbol
+
+                print(f"[{symbol}] Candle: {candle.timestamp} close={candle.close}")
+                await self.paper_trader.process_candle(candle)
+        except asyncio.CancelledError:
+            print(f"[WeexTradingLoop] Task for {symbol} cancelled.")
+        except Exception as e:
+            print(f"[WeexTradingLoop] Fatal error in {symbol} loop: {e}")
+            import traceback
+            traceback.print_exc()
+
     async def run(self):
         """Start live trading loop."""
         self.running = True
-        print("[WeexTradingLoop] Starting live trading (REAL WEEX)...")
+        print(f"[WeexTradingLoop] Starting live trading for symbols: {self.symbols}")
 
-        try:
-            async for candle in self.streamer.stream_candles():
-                if not self.running:
-                    break
+        tasks = [self._run_for_symbol(symbol) for symbol in self.symbols]
+        await asyncio.gather(*tasks)
 
-                print(
-                    f"[WeexTradingLoop] Candle: {candle.timestamp} close={candle.close}"
-                )
-                
-                # DELEGATE ALL LOGIC TO THE TRADING ENGINE (PaperTrader)
-                # PaperTrader is now responsible for signal generation, governance,
-                # and calling the execution client.
-                await self.paper_trader.process_candle(candle)
-
-        except asyncio.CancelledError:
-            print("[WeexTradingLoop] Cancelled.")
-        except Exception as e:
-            print(f"[WeexTradingLoop] Fatal error: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            self.running = False
-            print("[WeexTradingLoop] Loop exited.")
+        self.running = False
+        print("[WeexTradingLoop] All symbol loops have exited.")
 
     async def stop(self):
         """Stop live trading loop gracefully."""
