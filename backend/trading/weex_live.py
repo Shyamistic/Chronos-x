@@ -12,11 +12,6 @@ from typing import AsyncGenerator, Optional, List, Dict, Any
 from backend.agents.signal_agents import Candle
 from backend.trading.weex_client import WeexClient
 from backend.trading.paper_trader import PaperTrader
-from backend.risk.kelly_criterion import KellyCriterionSizer
-from backend.risk.circuit_breaker import MultiLayerCircuitBreaker
-from backend.execution.smart_execution import SmartExecutionEngine
-from backend.monitoring.real_time_analytics import RealTimePerformanceMonitor
-from backend.governance.mpc_governance import MPCGovernance
 from backend.config import TradingConfig
 
 
@@ -157,6 +152,10 @@ class WeexTradingLoop:
             granularity="1m",
             poll_interval_sec=poll_interval,
         )
+
+        # Inject execution client into PaperTrader if not already set
+        if not self.paper_trader.execution_client:
+            self.paper_trader.execution_client = self.client
 
         # Connect monitor to paper_trader for trade recording
         if self.monitor and hasattr(self.monitor, "record_trade"):

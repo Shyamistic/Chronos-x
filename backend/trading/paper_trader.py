@@ -50,6 +50,7 @@ class TradeRecord:
     contributing_agents: List[str] = None
     ensemble_confidence: float = 0.0
     order_id: Optional[str] = None
+    highest_pnl_pct: float = 0.0
 
     def __post_init__(self):
         if self.contributing_agents is None:
@@ -61,9 +62,11 @@ class PaperTrader:
         self,
         symbol: str = "cmt_btcusdt",
         config: Optional[TradingConfig] = None,
+        execution_client: Optional[Any] = None,
     ):
         self.symbol = symbol
         self.config = config or TradingConfig()
+        self.execution_client = execution_client
         initial_balance = self.config.ACCOUNT_EQUITY
         self.initial_balance = initial_balance
         self.balance = initial_balance
@@ -166,17 +169,47 @@ class PaperTrader:
             ):
                 return True, f"Opposing signal (conf: {ensemble_decision.confidence:.2f})"
 
-        # Exit Trigger 2: Hard Stop Loss (from config)
+        # Calculate PnL for Exits
         entry_price = position.entry_price
         current_price = candle.close
         direction = 1 if position.side == "buy" else -1
         pnl_pct = ((current_price - entry_price) / entry_price) * direction
 
+        # Update High Water Mark (Peak PnL)
+        if pnl_pct > position.highest_pnl_pct:
+            position.highest_pnl_pct = pnl_pct
+
+        # Exit Trigger 2: Hard Stop Loss (from config)
         if pnl_pct < -self.config.HARDSTOP_PCT:
             return True, f"Hardstop loss hit: {pnl_pct:.2%}"
 
-        # Exit Trigger 3: Max Hold Time (from config)
+        # Exit Trigger 3: Take Profit (2.0R Dynamic Target)
+        if pnl_pct > self.config.HARDSTOP_PCT * 2.0:
+            return True, f"Take Profit hit (2.0R): {pnl_pct:.2%}"
+
+        # Exit Trigger 4: Trailing Stop (Activate after 0.5R profit)
+        # If we are up > 0.5R, and give back 40% of peak profit, exit.
+        activation_threshold = self.config.HARDSTOP_PCT * 0.5
+        if position.highest_pnl_pct > activation_threshold:
+            trail_floor = position.highest_pnl_pct * 0.6  # Secure 60% of peak
+            if pnl_pct < trail_floor:
+                return True, f"Trailing Stop hit: {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%})"
+
+        # Exit Trigger 5: Breakeven Protection (Secure 1R)
+        # If we reached 1R profit, ensure we don't lose money (stop at +0.05%)
+        if position.highest_pnl_pct >= self.config.HARDSTOP_PCT:
+            if pnl_pct <= 0.0005:
+                return True, f"Breakeven protection hit (Peak: {position.highest_pnl_pct:.2%})"
+
+        # Calculate hold time for time-based triggers
         hold_time_minutes = (candle.timestamp - position.timestamp).total_seconds() / 60
+
+        # Exit Trigger 6: Stale Profit (Time Decay)
+        # If held > 50% of max time and we have small profit (>0.2%), take it.
+        if hold_time_minutes > (self.config.MAX_HOLD_TIME_MINUTES * 0.5) and pnl_pct > 0.002:
+            return True, f"Stale profit exit: {pnl_pct:.2%} after {int(hold_time_minutes)}m"
+
+        # Exit Trigger 3: Max Hold Time (from config)
         if hold_time_minutes > self.config.MAX_HOLD_TIME_MINUTES:
             return True, f"Max hold time exceeded: {int(hold_time_minutes)}m"
 
@@ -260,15 +293,17 @@ class PaperTrader:
                 closes = [c.close for c in self.momentum_agent.history[-20:]]
                 sma20 = sum(closes) / len(closes)
                 trend_dir = 1 if candle.close > sma20 else -1
+                # Boost confidence to ensure we trade when primary agents are quiet
+                fallback_conf = max(0.25, self.config.MIN_CONFIDENCE + 0.05)
                 from backend.agents.signal_agents import TradingSignal as AgentTradingSignal
                 trend_sig = AgentTradingSignal(
                     agent_id="trend_fallback",
                     direction=trend_dir,
-                    confidence=0.12,
+                    confidence=fallback_conf,
                     metadata={"sma20": sma20, "close": candle.close}
                 )
                 signals.append(trend_sig)
-                print(f"[PaperTrader] ALPHA: Fallback trend signal dir={trend_dir}, conf=0.12")
+                print(f"[PaperTrader] ALPHA: Fallback trend signal dir={trend_dir}, conf={fallback_conf:.2f}")
 
         # Get dynamic weights and combine signals
         weights = self.portfolio_manager.sample_weights_for_regime(regime)
@@ -349,6 +384,7 @@ class PaperTrader:
                 regime=regime.value,
                 contributing_agents=[s.agent_id for s in ensemble_decision.agent_signals],
                 ensemble_confidence=ensemble_decision.confidence,
+                stop_loss=trading_signal.stop_loss,
             )
             print(
                 f"[PaperTrader] Opened position side={side}, size={final_size:.6f}, "
@@ -370,6 +406,7 @@ class PaperTrader:
         regime: str = "unknown",
         contributing_agents: List[str] = None,
         ensemble_confidence: float = 0.0,
+        stop_loss: float = 0.0,
     ):
         self.open_position = TradeRecord(
             timestamp=timestamp,
@@ -387,6 +424,22 @@ class PaperTrader:
             ensemble_confidence=ensemble_confidence,
             order_id=str(uuid.uuid4()),
         )
+
+        # EXECUTION: Send order to WEEX if client is connected
+        if self.execution_client:
+            try:
+                # Map side to WEEX type: 1=Open Long, 2=Open Short
+                order_type = "1" if side == "buy" else "2"
+                print(f"[PaperTrader] EXECUTION: Placing {side} order for {size:.4f} BTC...")
+                self.execution_client.place_order(
+                    symbol=self.symbol,
+                    size=str(size),
+                    type_=order_type,
+                    price=str(price),
+                    client_order_id=self.open_position.order_id
+                )
+            except Exception as e:
+                print(f"[PaperTrader] EXECUTION ERROR: {e}")
 
     def _close_position(self, exit_price: float, timestamp: datetime):
         if not self.open_position:
@@ -414,11 +467,28 @@ class PaperTrader:
             contributing_agents=self.open_position.contributing_agents,
             ensemble_confidence=self.open_position.ensemble_confidence,
             order_id=self.open_position.order_id,
+            highest_pnl_pct=self.open_position.highest_pnl_pct,
         )
 
         # NEW: hook external monitor if set (ensure dict is passed)
         if hasattr(self, "on_trade_closed") and callable(self.on_trade_closed):
             self.on_trade_closed(asdict(trade))
+
+        # EXECUTION: Close position on WEEX
+        if self.execution_client:
+            try:
+                # Map side to WEEX type: 3=Close Long, 4=Close Short
+                # Note: If open was 'buy' (Long), we need to Close Long (3).
+                close_type = "3" if self.open_position.side == "buy" else "4"
+                print(f"[PaperTrader] EXECUTION: Closing {self.open_position.side} position...")
+                self.execution_client.place_order(
+                    symbol=self.symbol,
+                    size=str(self.open_position.size),
+                    type_=close_type,
+                    price=str(exit_price),
+                )
+            except Exception as e:
+                print(f"[PaperTrader] EXECUTION ERROR (Close): {e}")
 
         self.trades.append(trade)
         self.balance += pnl
