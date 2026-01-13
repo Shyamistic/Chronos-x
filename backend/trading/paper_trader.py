@@ -146,6 +146,7 @@ class PaperTrader:
         # Competition Metrics
         self.high_conviction_trades = 0
         self.processed_candles_count = 0 # Track processed candles for regime warm-up
+        self.reconciliation_stable = False # Set by WeexTradingLoop
 
     # ================================================================ #
     # Account state helpers
@@ -269,14 +270,20 @@ class PaperTrader:
         self.processed_candles_count += 1
         self.regime_detector.update(candle.close)
         regime_state = self.regime_detector.detect()
-        
-        # If regime is UNKNOWN after initial lookback, force it to REVERSAL for trading activity
-        # This ensures we don't stay idle if the detector is too conservative,
-        # while still respecting the "ban UNKNOWN" rule by classifying it as something tradable.
-        if regime_state.current == MarketRegime.UNKNOWN and self.processed_candles_count >= self.regime_detector.lookback:
-            self.current_regime = MarketRegime.REVERSAL
-            print(f"[PaperTrader] Forced regime from UNKNOWN to REVERSAL after {self.processed_candles_count} candles to enable trading.")
+
+        # AGGRESSIVE REGIME FORCING FOR COMPETITION
+        if regime_state.current == MarketRegime.UNKNOWN:
+            # If z_score is high, we are in a trend regardless of what the detector says
+            z_score = regime_state.z_score
+            if abs(z_score) > 1.5: # 1.5 standard deviations is a significant move
+                forced_regime = MarketRegime.BULL_TREND if z_score > 0 else MarketRegime.BEAR_TREND
+                print(f"[PaperTrader] Forced regime from UNKNOWN to {forced_regime.value} due to high z-score ({z_score:.2f}).")
+                self.current_regime = forced_regime
+            else:
+                # If not trending, but still unknown, keep it unknown.
+                self.current_regime = MarketRegime.UNKNOWN
         else:
+            # If detector has a classification, use it.
             self.current_regime = regime_state.current
 
         self.portfolio_manager.set_regime(self.current_regime)
@@ -396,18 +403,27 @@ class PaperTrader:
 
         is_pyramiding = False
 
+        # Update equity at the start of processing each candle
+        self._update_equity(mark_price=candle.close, symbol=candle.symbol)
+
         # 1. Handle Signal Flips & Pyramiding
         if current_position and new_direction != 0:
             is_long = current_position.side == 'buy'
             
             # Signal Flip: Close opposing
             if (is_long and new_direction == -1) or (not is_long and new_direction == 1):
+                # Before closing, check if the flip is due to low confidence.
+                # If confidence is very low, it might be noise, so don't flip aggressively.
+                if ensemble_decision.confidence < self.config.MIN_CONFIDENCE:
+                    print(f"[PaperTrader] SIGNAL FLIP: Suppressing due to low confidence ({ensemble_decision.confidence:.2f}).")
+                    return
                 print(f"[PaperTrader] SIGNAL FLIP: Closing {current_position.side} position for {candle.symbol}.")
                 self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason="signal_flip")
                 current_position = None # Position is now closed
             
             # Pyramiding (Competition Mode): Add to winner if confidence is high
-            elif self.config.COMPETITION_MODE and ensemble_decision.confidence > 0.6:
+            # Gated by reconciliation status to prevent state-blind pyramiding
+            elif self.config.COMPETITION_MODE and self.reconciliation_stable and ensemble_decision.confidence > 0.6:
                 # Only pyramid if we are in profit and in the same direction
                 # STEP 3: MANDATORY PYRAMIDING ON WINNERS
                 is_strong_regime = regime.value in ("bull_trend", "bear_trend")
@@ -436,10 +452,14 @@ class PaperTrader:
 
 
         if allow_entry:
-            # STEP 1: BAN TRADING IN UNKNOWN REGIME
-            if regime == MarketRegime.UNKNOWN: # This will only trigger if still in warm-up phase, as _detect_regime forces it otherwise
-                print("[PaperTrader] COMPETITION RULE: Trade blocked in UNKNOWN regime.")
-                return
+            # Handle UNKNOWN regime during warm-up or if detector is truly stuck
+            if regime == MarketRegime.UNKNOWN:
+                if self.processed_candles_count < self.regime_detector.lookback:
+                    print(f"[PaperTrader] WARM-UP: Trading in UNKNOWN regime with conservative sizing (candle {self.processed_candles_count}/{self.regime_detector.lookback}).")
+                    # Allow to proceed, but sizing will be minimal due to default Kelly and low confidence
+                else:
+                    print("[PaperTrader] COMPETITION RULE: Trade blocked in persistent UNKNOWN regime after warm-up.")
+                    return
 
             if new_direction == 0:
                 print("[PaperTrader] Ensemble flat (direction=0) -> no trade")
@@ -471,13 +491,17 @@ class PaperTrader:
             # STEP 2: CONVICTION-BASED POSITION EXPLOSION
             conf = ensemble_decision.confidence
             if conf < 0.75:
-                size_multiplier = 1.0
+                size_multiplier = 1.0 # Base size
             elif conf < 0.85:
                 size_multiplier = 2.0
             else: # conf >= 0.85
                 size_multiplier = 3.0
             
-            scaled_size_usdt = base_size_usdt * size_multiplier
+            # Apply an additional penalty for UNKNOWN regime during warm-up
+            if regime == MarketRegime.UNKNOWN and self.processed_candles_count < self.regime_detector.lookback:
+                scaled_size_usdt = base_size_usdt * 0.2 # Very conservative sizing during warm-up
+            else:
+                scaled_size_usdt = base_size_usdt * size_multiplier
 
             # For pyramiding, we are adding to an existing position.
             # The size should be an *additional* amount, not the total.
@@ -706,6 +730,21 @@ class PaperTrader:
             f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "
             f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}, total_pnl={self.total_pnl:.4f}, reason='{exit_reason}'"
         )
+
+    def reconcile_positions_from_response(self, resp: Dict[str, Any]):
+        """Parse WEEX API response and reconcile positions."""
+        positions = []
+        if isinstance(resp, dict) and "data" in resp:
+            # Handle WEEX response format (often data is a list or data['lists'])
+            data = resp["data"]
+            if isinstance(data, list): positions = data
+            elif isinstance(data, dict) and "lists" in data: positions = data["lists"]
+        
+        if positions:
+            self.reconcile_positions(positions)
+            # Message moved to WeexTradingLoop to centralize state reporting
+        else:
+            print("[PaperTrader] No open positions found on exchange during reconciliation.")
 
     def reconcile_positions(self, external_positions: List[Dict[str, Any]]):
         """

@@ -212,27 +212,25 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         MAX_RECONCILIATION_ATTEMPTS = 5 # Limit attempts to avoid infinite loop on persistent API errors
         # --- RECONCILIATION START ---
         print("[WeexTradingLoop] Fetching open positions from WEEX for reconciliation...")
+        reconciliation_successful = False
         if hasattr(self.client, "get_open_positions"):
             for attempt in range(MAX_RECONCILIATION_ATTEMPTS):
                 try:
                     # Fetch positions (generic fetch, not specific to one symbol if possible)
                     resp = self.client.get_open_positions(symbol=None)
-                    positions = []
-                    if isinstance(resp, dict) and "data" in resp:
-                        # Handle WEEX response format (often data is a list or data['lists'])
-                        data = resp["data"]
-                        if isinstance(data, list): positions = data
-                        elif isinstance(data, dict) and "lists" in data: positions = data["lists"]
-                    
-                    if positions:
-                        self.paper_trader.reconcile_positions(positions)
-                    else:
-                        print("[WeexTradingLoop] No open positions found on exchange.")
-                    break # Success, exit retry loop
+                    self.paper_trader.reconcile_positions_from_response(resp)
+                    reconciliation_successful = True
+                    break  # Success, exit retry loop
                 except Exception as e:
-                    print(f"[WeexTradingLoop] Reconciliation failed: {e}. Retrying in 5s...")
+                    print(f"[WeexTradingLoop] Reconciliation attempt {attempt + 1}/{MAX_RECONCILIATION_ATTEMPTS} failed: {e}. Retrying in 5s...")
                     await asyncio.sleep(5)
 
+        if reconciliation_successful:
+            self.paper_trader.reconciliation_stable = True
+            print("[WeexTradingLoop] STATE: Reconciliation successful. Exchange state is source of truth. Pyramiding ENABLED.")
+        else:
+            self.paper_trader.reconciliation_stable = False
+            print("[WeexTradingLoop] WARNING: Reconciliation failed. Switching to internal ledger as source of truth. Pyramiding DISABLED.")
         # --- RECONCILIATION END ---
 
         tasks = [self._run_for_symbol(symbol) for symbol in self.symbols]
