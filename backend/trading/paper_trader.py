@@ -340,6 +340,12 @@ class PaperTrader:
             base_size_usdt = self.config.MAX_POSITION_SIZE * self.config.KELLY_FRACTION
             scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
             size_in_btc = scaled_size_usdt / candle.close
+            
+            # QUANTIZATION FIX: Enforce WEEX contract step size (0.0001 BTC)
+            step_size = 0.0001
+            # Round to nearest step, ensure at least 1 step if we are trading
+            size_in_btc = max(step_size, round(size_in_btc / step_size) * step_size)
+            size_in_btc = round(size_in_btc, 4) # Prevent float precision errors
 
             trading_signal = TradingSignal(
                 symbol=self.symbol,
@@ -440,6 +446,9 @@ class PaperTrader:
                 )
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR: {e}")
+                # CRITICAL: Rollback internal state if execution fails
+                self.open_position = None
+                return
 
     def _close_position(self, exit_price: float, timestamp: datetime):
         if not self.open_position:
