@@ -177,6 +177,45 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         )
         TradingConfig.print_config()
 
+    async def _prime_symbol(self, symbol: str, num_candles: int = 200):
+        """Fetch historical data to warm up agents."""
+        try:
+            print(f"[WeexTradingLoop] Priming agents for {symbol} with {num_candles} historical candles...")
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None, self.client.get_candles, symbol, "1m", num_candles
+            )
+
+            if isinstance(resp, dict) and 'data' in resp and 'lists' in resp['data']:
+                candle_data_list = resp['data']['lists']
+            elif isinstance(resp, list):
+                candle_data_list = resp
+            else:
+                print(f"[WeexTradingLoop] Priming for {symbol} failed: Unexpected data format.")
+                return
+
+            candles = []
+            for raw_candle in candle_data_list:
+                if isinstance(raw_candle, list) and len(raw_candle) >= 6:
+                    try:
+                        candle = Candle(
+                            timestamp=datetime.fromtimestamp(int(raw_candle[0]) / 1000),
+                            open=float(raw_candle[1]),
+                            high=float(raw_candle[2]),
+                            low=float(raw_candle[3]),
+                            close=float(raw_candle[4]),
+                            volume=float(raw_candle[5]),
+                        )
+                        candles.append(candle)
+                    except (ValueError, IndexError) as e:
+                        print(f"[WeexTradingLoop] Skipping malformed candle during priming: {raw_candle}, error: {e}")
+
+            if candles:
+                await self.paper_trader.prime_agents(symbol, candles)
+            print(f"[WeexTradingLoop] Priming for {symbol} complete.")
+        except Exception as e:
+            print(f"[WeexTradingLoop] WARNING: Failed to prime agents for {symbol}: {e}")
+
     async def _run_for_symbol(self, symbol: str):
         """The trading logic loop for a single symbol."""
         streamer = WeexLiveStreamer(
@@ -208,6 +247,12 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         """Start live trading loop."""
         self.running = True
         print(f"[WeexTradingLoop] Starting live trading for symbols: {self.symbols}")
+
+        # --- AGENT PRIMING ---
+        # Fetch historical data to warm up agents like Momentum and ML
+        prime_tasks = [self._prime_symbol(symbol) for symbol in self.symbols]
+        await asyncio.gather(*prime_tasks)
+        # --- END PRIMING ---
 
         MAX_RECONCILIATION_ATTEMPTS = 5 # Limit attempts to avoid infinite loop on persistent API errors
         # --- RECONCILIATION START ---

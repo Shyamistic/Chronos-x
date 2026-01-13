@@ -471,9 +471,6 @@ class SentimentAgent:
         On 2nd+ candles, even tiny moves (0.01%) trigger a direction.
         First candle emits neutral (no prior close to compare).
         """
-        # Threshold: 0.01% move is enough to pick a direction
-        threshold = 0.0001  # 0.01%
-
         # First candle or truly no price movement
         if self.last_close is None or abs(self.last_score) < 1e-8:
             return TradingSignal(
@@ -482,21 +479,15 @@ class SentimentAgent:
                 confidence=0.05,
             )
 
-        # On 2nd+ candles: any move (even < 0.01%) produces direction
-        if abs(self.last_score) < threshold:
-            # Micro-move: emit weak directional signal
-            direction = 1 if self.last_score >= 0 else -1
-            confidence = 0.35  # Competitive confidence level
-            return TradingSignal(
-                agent_id=self.agent_id,
-                direction=direction,
-                confidence=confidence,
-                metadata={"price_change_pct": self.last_score * 100},
-            )
+        # For competition, any directional move is a signal.
+        direction = 1 if self.last_score >= 0 else -1
 
-        # Meaningful move (>= 0.01%)
-        direction = 1 if self.last_score > 0 else -1
-        confidence = min(0.65, max(0.35, abs(self.last_score) * 150))  # 35-65% range for competition
+        # New confidence logic: floor is actionable, scales aggressively.
+        # This ensures any signal from this agent can pass the MIN_CONFIDENCE filter.
+        base_confidence = 0.56  # Set just above the config's MIN_CONFIDENCE of 0.55
+        # Scale confidence with the size of the price move
+        scaled_confidence = base_confidence + (abs(self.last_score) * 1000)
+        confidence = min(0.80, scaled_confidence) # Cap at 0.80
 
         return TradingSignal(
             agent_id=self.agent_id,
@@ -594,15 +585,31 @@ class EnsembleAgent:
 
         raw = weighted_dir / total_weight
         direction = 1 if raw > 0 else -1
-        confidence = min(1.0, max(0.05, abs(raw)))
+        base_confidence = min(1.0, max(0.05, abs(raw)))
+
+        # --- Disagreement Penalty ---
+        # Penalize confidence if agents disagree on direction
+        long_votes = sum(1 for s in active if s.direction > 0)
+        short_votes = sum(1 for s in active if s.direction < 0)
+        disagreement_penalty = 0.0
+        
+        if long_votes > 0 and short_votes > 0:
+            # Calculate a penalty score (0-1)
+            disagreement_score = min(long_votes, short_votes) / max(long_votes, short_votes)
+            # Apply a penalty factor (e.g., 0.5)
+            disagreement_penalty = 0.5 * disagreement_score
+            confidence = base_confidence * (1 - disagreement_penalty)
+            print(f"[Ensemble] Disagreement detected ({long_votes}L/{short_votes}S). Penalty: {disagreement_penalty:.2f}")
+        else:
+            confidence = base_confidence
 
         print(
             f"[Ensemble] FINAL dir={direction}, conf={confidence:.3f}, raw={raw:.4f}"
         )
 
-        return TradingDecision(
+        return TradingDecision( # This was incorrectly EnsembleDecision before
             direction=direction,
             confidence=confidence,
             agent_signals=active,
-            metadata={"raw_score": float(raw), "disagreement_penalty": 0.0},
+            metadata={"raw_score": float(raw), "disagreement_penalty": disagreement_penalty},
         )

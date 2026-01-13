@@ -295,6 +295,26 @@ class PaperTrader:
     # Main simulation APIs
     # ================================================================ #
 
+    async def prime_agents(self, symbol: str, candles: List[Candle]):
+        """Warm up agents with historical data."""
+        print(f"[PaperTrader] Priming agents for {symbol} with {len(candles)} candles...")
+        
+        # Prime agents that need history
+        for candle in candles:
+            self.momentum_agent.update(candle)
+            self.ml_agent.update(candle)
+            # The regime detector also benefits from this, even with a short lookback
+            self.regime_detector.update(candle.close)
+
+        # Train the ML model once after priming
+        if self.ml_agent and hasattr(self.ml_agent, 'train'):
+            df = pd.DataFrame([asdict(c) for c in candles])
+            if not df.empty:
+                try:
+                    self.ml_agent.train(df)
+                except Exception as e:
+                    print(f"[PaperTrader] ML Agent training failed during priming: {e}")
+
     async def run_live_simulation(self, candle_stream, hours: int = 24):
         """Simulate N hours of trading on a candle async generator."""
         async for candle in candle_stream:
@@ -332,7 +352,21 @@ class PaperTrader:
         # Update all agents with the new candle data
         self.momentum_agent.update(candle)
         self.sentiment_agent.update(candle)
-        self.order_flow_agent.reset_window()  # Or update with real flow data
+        
+        # --- NEW: Order Flow Estimation ---
+        # Estimate buy/sell volume from candle data to make OrderFlowAgent functional
+        try:
+            total_range = candle.high - candle.low
+            if total_range > 0:
+                buy_pressure = (candle.close - candle.low) / total_range
+                # Simple heuristic: volume is split by pressure
+                buy_volume = candle.volume * buy_pressure
+                sell_volume = candle.volume * (1 - buy_pressure)
+                self.order_flow_agent.update_volume(buy_volume, sell_volume)
+        except Exception as e:
+            print(f"[PaperTrader] Order flow estimation failed: {e}")
+        # --- END Order Flow Estimation ---
+
         self.ml_agent.update(candle)  # Also update ML agent
         self._update_equity(mark_price=candle.close, symbol=candle.symbol)
         
@@ -399,9 +433,9 @@ class PaperTrader:
             strongest_signal = max(signals, key=lambda s: s.confidence)
             if strongest_signal.confidence >= 0.6: # User specified threshold
                 print(f"[PaperTrader] COMPETITION: Ensemble flat, overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
-                from backend.agents.signal_agents import EnsembleDecision
+                from backend.agents.signal_agents import TradingDecision
                 # Create a new ensemble decision based on this single agent
-                ensemble_decision = EnsembleDecision(
+                ensemble_decision = TradingDecision(
                     direction=strongest_signal.direction,
                     confidence=strongest_signal.confidence,
                     agent_signals=[strongest_signal] # Log that this was an override
