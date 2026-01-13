@@ -319,8 +319,8 @@ class PaperTrader:
 
         if len(self.momentum_agent.history) >= self.atr_period:
             # Ensure history is for the current symbol if momentum_agent is global
-            # Assuming momentum_agent.history is a list of candles for the current symbol
-            highs = [c.high for c c in self.momentum_agent.history[-self.atr_period:]]
+            # Assuming momentum_agent.history is a list of candles for the current symbol, or a dict of lists
+            highs = [c.high for c in self.momentum_agent.history[-self.atr_period:]]
             lows = [c.low for c in self.momentum_agent.history[-self.atr_period:]]
             closes = [c.close for c in self.momentum_agent.history[-self.atr_period:]]
             
