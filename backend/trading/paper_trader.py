@@ -274,7 +274,8 @@ class PaperTrader:
         # AGGRESSIVE REGIME FORCING FOR COMPETITION
         if regime_state.current == MarketRegime.UNKNOWN:
             # If z_score is high, we are in a trend regardless of what the detector says
-            z_score = regime_state.z_score
+            # FIX: z_score is an attribute of the detector, not the state object it returns.
+            z_score = self.regime_detector.z_score if hasattr(self.regime_detector, 'z_score') else 0.0
             if abs(z_score) > 1.5: # 1.5 standard deviations is a significant move
                 forced_regime = MarketRegime.BULL_TREND if z_score > 0 else MarketRegime.BEAR_TREND
                 print(f"[PaperTrader] Forced regime from UNKNOWN to {forced_regime.value} due to high z-score ({z_score:.2f}).")
