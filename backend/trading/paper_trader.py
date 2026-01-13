@@ -63,7 +63,11 @@ class PaperTrader:
         self,
         config: Optional[TradingConfig] = None,
         execution_client: Optional[Any] = None,
+        **kwargs,
     ):
+        if 'symbol' in kwargs:
+            logger.warning("The 'symbol' argument for PaperTrader is deprecated and will be ignored. The trader now operates on multiple symbols.")
+
         self.config = config or TradingConfig()
         self.execution_client = execution_client
         initial_balance = self.config.ACCOUNT_EQUITY
