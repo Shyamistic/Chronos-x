@@ -431,7 +431,7 @@ class PaperTrader:
                 return
             
             # Regime-based trading restriction (Concentrate Risk)
-            if self.config.COMPETITION_MODE and not self.config.TRADE_IN_CHOPPY_REGIME and regime == MarketRegime.CHOP:
+            if self.config.COMPETITION_MODE and not self.config.TRADE_IN_CHOPPY_REGIME and regime.value == 'CHOP':
                 print("[PaperTrader] COMPETITION MODE: Blocking new entry in CHOP regime.")
                 return
             
@@ -442,9 +442,9 @@ class PaperTrader:
             
             # Dynamic Kelly Fraction based on regime and confidence
             dynamic_kelly_fraction = self.config.KELLY_FRACTION # Default
-            if regime == MarketRegime.BULL_TREND or regime == MarketRegime.BEAR_TREND:
+            if regime.value in (MarketRegime.BULL_TREND.value, MarketRegime.BEAR_TREND.value):
                 dynamic_kelly_fraction *= self.config.KELLY_TREND_MULTIPLIER
-            elif regime == MarketRegime.CHOP or regime == MarketRegime.REVERSAL:
+            elif regime.value in ('CHOP', MarketRegime.REVERSAL.value):
                 dynamic_kelly_fraction *= self.config.KELLY_CHOP_MULTIPLIER
             dynamic_kelly_fraction = max(self.config.MIN_KELLY_FRACTION, min(self.config.MAX_KELLY_FRACTION, dynamic_kelly_fraction))
 
