@@ -113,11 +113,8 @@ def close_all():
             continue
             
         try:
-            # Fetch ticker for logging/fallback price (required by API even if market)
-            ticker = client.get_ticker(symbol)
+            # For market close, price is 0 and match_price is 1. No need to fetch ticker.
             price = "0"
-            if ticker and "data" in ticker and isinstance(ticker["data"], list) and len(ticker["data"]) > 0:
-                 price = ticker["data"][-1][4] # Close price
 
             print(f"Sending {desc} order for {symbol} with size {size} at market...")
             
