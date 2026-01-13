@@ -60,7 +60,7 @@ class Backtester:
         backtest_config = TradingConfig()
         backtest_config.ACCOUNT_EQUITY = self.initial_balance
         # Use the actual PaperTrader to ensure backtest matches live logic
-        trader = PaperTrader(symbol=self.symbol, config=backtest_config)
+        trader = PaperTrader(config=backtest_config) # PaperTrader no longer takes 'symbol' directly
 
         # Run the simulation asynchronously
         loop = asyncio.get_event_loop()
@@ -70,13 +70,16 @@ class Backtester:
             candle = Candle.from_row(row)
             # Process each candle using the exact same logic as the live trader
             loop.run_until_complete(trader.process_candle(candle))
-
-        if trader.open_position:
+            
+        # Close any remaining open positions at the last candle's close price
+        if trader.open_positions:
             last_row = df.iloc[-1]
-            trader._close_position(
-                exit_price=float(last_row["close"]),
-                timestamp=pd.to_datetime(last_row["timestamp"]),
-            )
+            for symbol, position in trader.open_positions.copy().items():
+                trader._close_position(
+                    symbol=symbol,
+                    exit_price=float(last_row["close"]),
+                    timestamp=pd.to_datetime(last_row["timestamp"]),
+                )
 
         metrics = trader.get_summary_metrics()
         final_balance = trader.balance

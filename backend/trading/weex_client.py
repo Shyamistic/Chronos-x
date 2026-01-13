@@ -63,6 +63,8 @@ class WeexClient:
         self,
         method: str,
         path: str,
+        retries: int = 3,
+        backoff_factor: float = 0.5,
         params: Optional[Dict[str, Any]] = None,
         json_body: Optional[Dict[str, Any]] = None,
         auth: bool = False,
@@ -97,20 +99,32 @@ class WeexClient:
                 }
             )
 
-        print(
-            f"[WeexClient] REQUEST {method} {path} "
-            f"qs={query_string} body={body_str} "
-            f"headers={{'ACCESS-KEY': '{self.api_key[:6]}...', "
-            f"'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
-        )
+        for attempt in range(retries):
+            try:
+                print(
+                    f"[WeexClient] REQUEST {method} {path} (Attempt {attempt + 1}/{retries}) "
+                    f"qs={query_string} body={body_str} "
+                    f"headers={{'ACCESS-KEY': '{self.api_key[:6]}...', "
+                    f"'ACCESS-TIMESTAMP': '{headers.get('ACCESS-TIMESTAMP','')}'}}"
+                )
 
-        resp = requests.request(
-            method=method.upper(),
-            url=url + query_string,
-            data=body_str if json_body is not None else None,
-            headers=headers,
-            timeout=self.timeout,
-        )
+                resp = requests.request(
+                    method=method.upper(),
+                    url=url + query_string,
+                    data=body_str if json_body is not None else None,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+                resp.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+                return resp.json()
+            except requests.exceptions.RequestException as e:
+                print(f"[WeexClient] API call failed (Attempt {attempt + 1}/{retries}): {e}")
+                if attempt < retries - 1:
+                    sleep_time = backoff_factor * (2 ** attempt)
+                    print(f"[WeexClient] Retrying in {sleep_time:.2f} seconds...")
+                    time.sleep(sleep_time)
+                else:
+                    raise # Re-raise the last exception if all retries fail
 
         if not resp.ok:
             print(
@@ -118,10 +132,6 @@ class WeexClient:
                 f"params={params} body={body_str} resp={resp.text}"
             )
         resp.raise_for_status()
-        try:
-            return resp.json()
-        except Exception:
-            return {"raw": resp.text}
 
     # ------------------------------------------------------------------
     # Public endpoints (no auth)

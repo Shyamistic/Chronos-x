@@ -126,6 +126,10 @@ class PaperTrader:
         # Regime detection
         self.regime_detector = RegimeDetector(lookback=20)
         self.current_regime = MarketRegime.UNKNOWN
+        
+        # ATR for adaptive stops
+        self.atr_history: Dict[str, List[float]] = {} # Store ATR per symbol
+        self.atr_period = 14
 
         # Trade tracking
         self.trades: List[TradeRecord] = []
@@ -192,29 +196,53 @@ class PaperTrader:
         if pnl_pct > position.highest_pnl_pct:
             position.highest_pnl_pct = pnl_pct
 
-        # Exit Trigger 2: Hard Stop Loss (from config)
-        if pnl_pct < -self.config.HARDSTOP_PCT:
-            return True, f"Hardstop loss hit: {pnl_pct:.2%}"
+        # --- Adaptive Stop/Take-Profit based on ATR ---
+        current_atr = self.atr_history.get(candle.symbol, [0])[-1] if self.atr_history.get(candle.symbol) else None
+        
+        if current_atr and entry_price > 0:
+            # Convert ATR to a percentage of entry price for comparison
+            atr_pct = (current_atr / entry_price)
+            
+            # Adaptive Stop Loss: e.g., 2x ATR below entry
+            adaptive_stop_loss_pct = self.config.ATR_STOP_MULTIPLIER * atr_pct
+            if pnl_pct < -adaptive_stop_loss_pct:
+                return True, f"Adaptive Hardstop loss hit: {pnl_pct:.2%} (ATR: {current_atr:.4f})"
 
-        # Exit Trigger 3: Take Profit (2.0R Dynamic Target)
-        if pnl_pct > self.config.HARDSTOP_PCT * 2.0:
-            return True, f"Take Profit hit (2.0R): {pnl_pct:.2%}"
+            # Adaptive Take Profit: e.g., 4x ATR above entry (2:1 R:R)
+            adaptive_take_profit_pct = self.config.ATR_TAKE_PROFIT_MULTIPLIER * atr_pct
+            if pnl_pct > adaptive_take_profit_pct:
+                return True, f"Adaptive Take Profit hit: {pnl_pct:.2%} (ATR: {current_atr:.4f})"
 
-        # Exit Trigger 4: Trailing Stop (Activate after 0.5R profit)
-        # If we are up > 0.5R, and give back 40% of peak profit, exit.
-        activation_threshold = self.config.HARDSTOP_PCT * 0.5
-        if position.highest_pnl_pct > activation_threshold:
-            trail_floor = position.highest_pnl_pct * 0.6  # Secure 60% of peak
-            if pnl_pct < trail_floor:
-                return True, f"Trailing Stop hit: {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%})"
+            # Adaptive Trailing Stop (Activate after 1x ATR profit, trail at 0.5x ATR from peak)
+            activation_threshold_atr = self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER * atr_pct
+            if position.highest_pnl_pct > activation_threshold_atr:
+                # Trail at a certain percentage below the highest PnL % achieved
+                trail_floor_pct = position.highest_pnl_pct - (self.config.ATR_TRAILING_FLOOR_MULTIPLIER * atr_pct)
+                if pnl_pct < trail_floor_pct:
+                    return True, f"Adaptive Trailing Stop hit: {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%}, ATR: {current_atr:.4f})"
 
-        # Exit Trigger 5: Breakeven Protection (Secure 1R)
-        # If we reached 1R profit, ensure we don't lose money (stop at +0.05%)
-        if position.highest_pnl_pct >= self.config.HARDSTOP_PCT:
-            if pnl_pct <= 0.0005:
-                return True, f"Breakeven protection hit (Peak: {position.highest_pnl_pct:.2%})"
+            # Adaptive Breakeven Protection (Move stop to breakeven + small profit after 1x ATR profit)
+            if position.highest_pnl_pct >= self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER * atr_pct:
+                if pnl_pct <= self.config.BREAKEVEN_PROFIT_PCT: # Small profit to cover fees
+                    return True, f"Adaptive Breakeven protection hit (Peak: {position.highest_pnl_pct:.2%}, ATR: {current_atr:.4f})"
+        else:
+            # --- Fallback to Fixed Stop/Take-Profit if ATR not available ---
+            if pnl_pct < -self.config.HARDSTOP_PCT:
+                return True, f"Hardstop loss hit (fixed): {pnl_pct:.2%}"
 
-        # Calculate hold time for time-based triggers
+            if pnl_pct > self.config.HARDSTOP_PCT * 2.0: # Simple 2:1 R:R
+                return True, f"Take Profit hit (fixed 2.0R): {pnl_pct:.2%}"
+
+            if position.highest_pnl_pct > self.config.HARDSTOP_PCT * 0.5:
+                trail_floor = position.highest_pnl_pct * 0.6
+                if pnl_pct < trail_floor:
+                    return True, f"Trailing Stop hit (fixed): {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%})"
+
+            if position.highest_pnl_pct >= self.config.HARDSTOP_PCT:
+                if pnl_pct <= 0.0005:
+                    return True, f"Breakeven protection hit (fixed): {pnl_pct:.2%}"
+
+        # --- Time-based triggers (always active) ---
         hold_time_minutes = (candle.timestamp - position.timestamp).total_seconds() / 60
 
         # Exit Trigger 6: Stale Profit (Time Decay)
@@ -284,6 +312,26 @@ class PaperTrader:
         self.order_flow_agent.reset_window()  # Or update with real flow data
         self.ml_agent.update(candle)  # Also update ML agent
         self._update_equity(mark_price=candle.close, symbol=candle.symbol)
+        
+        # Calculate ATR for adaptive stops
+        if candle.symbol not in self.atr_history:
+            self.atr_history[candle.symbol] = []
+
+        if len(self.momentum_agent.history) >= self.atr_period:
+            # Ensure history is for the current symbol if momentum_agent is global
+            # Assuming momentum_agent.history is a list of candles for the current symbol
+            highs = [c.high for c c in self.momentum_agent.history[-self.atr_period:]]
+            lows = [c.low for c in self.momentum_agent.history[-self.atr_period:]]
+            closes = [c.close for c in self.momentum_agent.history[-self.atr_period:]]
+            
+            tr_values = []
+            for i in range(self.atr_period):
+                tr = max(highs[i] - lows[i], abs(highs[i] - (closes[i-1] if i > 0 else closes[i])), abs(lows[i] - (closes[i-1] if i > 0 else closes[i])))
+                tr_values.append(tr)
+            current_atr = sum(tr_values) / self.atr_period
+            self.atr_history[candle.symbol].append(current_atr)
+        else:
+            self.atr_history[candle.symbol].append(0.0) # Append 0 or handle as needed until enough data
 
         # --- Generate Ensemble Decision (needed for both exits and entries) ---
         signals = []
@@ -319,7 +367,7 @@ class PaperTrader:
                 print(f"[PaperTrader] ALPHA: Fallback trend signal dir={trend_dir}, conf={fallback_conf:.2f}")
 
         # Get dynamic weights and combine signals
-        weights = self.portfolio_manager.sample_weights_for_regime(regime)
+        weights = self.portfolio_manager.sample_weights_for_regime(regime, self.equity) # Pass equity for bandit
         self.ensemble.weights = weights
         ensemble_decision = self.ensemble.combine(signals)
 
@@ -359,9 +407,19 @@ class PaperTrader:
                 return
             
             side = "buy" if new_direction > 0 else "sell"
+            
             # DYNAMIC POSITION SIZING: Base size on a % of current equity, divided among potential symbols
             max_pos_usdt = self.equity * self.config.MAX_POSITION_AS_PCT_EQUITY
-            base_size_usdt = max_pos_usdt * self.config.KELLY_FRACTION
+            
+            # Dynamic Kelly Fraction based on regime and confidence
+            dynamic_kelly_fraction = self.config.KELLY_FRACTION # Default
+            if regime == MarketRegime.BULL_TREND or regime == MarketRegime.BEAR_TREND:
+                dynamic_kelly_fraction *= self.config.KELLY_TREND_MULTIPLIER
+            elif regime == MarketRegime.CHOP or regime == MarketRegime.REVERSAL:
+                dynamic_kelly_fraction *= self.config.KELLY_CHOP_MULTIPLIER
+            dynamic_kelly_fraction = max(self.config.MIN_KELLY_FRACTION, min(self.config.MAX_KELLY_FRACTION, dynamic_kelly_fraction))
+
+            base_size_usdt = max_pos_usdt * dynamic_kelly_fraction
             scaled_size_usdt = base_size_usdt * ensemble_decision.confidence
             size = scaled_size_usdt / candle.close
             

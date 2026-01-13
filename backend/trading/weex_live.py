@@ -241,7 +241,39 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         print("[WeexTradingLoop] All symbol loops have exited.")
 
     async def stop(self):
-        """Stop live trading loop gracefully."""
-        print("[WeexTradingLoop] Stopping...")
+        """Stop live trading loop gracefully and close all open positions."""
+        print("[WeexTradingLoop] Stopping and closing all open positions...")
         self.running = False
-        await asyncio.sleep(0.5)
+
+        # Iterate through a copy of open_positions to avoid RuntimeError: dictionary changed size during iteration
+        open_positions_copy = self.paper_trader.open_positions.copy()
+        if not open_positions_copy:
+            print("[WeexTradingLoop] No open positions to close.")
+            await asyncio.sleep(0.5)
+            return
+
+        loop = asyncio.get_event_loop()
+        for symbol, position in open_positions_copy.items():
+            try:
+                # Get current market price for closing (run in executor to avoid blocking)
+                ticker_resp = await loop.run_in_executor(None, self.client.get_ticker, symbol)
+                current_price = "0" # Default to 0 for market order if ticker fails
+                if ticker_resp and 'data' in ticker_resp and isinstance(ticker_resp['data'], list) and len(ticker_resp['data']) > 0:
+                    current_price = str(float(ticker_resp['data'][-1][4])) # Assuming this is the correct path to the close price
+
+                print(f"[WeexTradingLoop] Closing {position.side} position for {symbol} at market price (last known: {current_price})...")
+                # _close_position is synchronous, so call it directly
+                self.paper_trader._close_position(
+                    symbol=symbol,
+                    exit_price=float(current_price), # Pass as float as expected by _close_position
+                    timestamp=datetime.now(), # Use current time for exit
+                    exit_reason="trading_loop_stopped"
+                )
+                await asyncio.sleep(0.5) # Small delay to prevent rate limits
+            except Exception as e:
+                print(f"[WeexTradingLoop] Error closing position for {symbol}: {e}")
+                import traceback
+                traceback.print_exc()
+
+        print("[WeexTradingLoop] All open positions attempted to close.")
+        await asyncio.sleep(0.5) # Final small delay
