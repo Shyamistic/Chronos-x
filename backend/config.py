@@ -35,6 +35,7 @@ class TradingConfig:
     MAX_SLIPPAGE = 0.003  # 0.3%
     MAX_EXECUTION_LATENCY_MS = 1500  # 1.5 seconds
     MIN_VOLUME_RATIO = 0.01  # Order must be <1% of recent volume
+    MAX_RISK_PER_TRADE = 0.06 if COMPETITION_MODE else 0.02 # Allow 6% equity risk per trade to support 5x leverage
 
     # ============================================================================
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE

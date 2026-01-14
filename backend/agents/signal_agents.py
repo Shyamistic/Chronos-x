@@ -151,9 +151,9 @@ class MomentumRSIAgent:
         # COMPETITION ADDITION: Momentum Breakout Logic
         # If RSI is strong and price is trending, don't wait for a dip—BUY.
         if direction == 0:
-            if rsi > 53 and last_close > sma: # Lowered threshold to catch moves earlier
+            if rsi > 51 and last_close > sma: # Hyper-sensitive: Catch breakout immediately
                 direction = +1 # Momentum Long
-            elif rsi < 47 and last_close < sma: # Raised threshold to catch drops earlier
+            elif rsi < 49 and last_close < sma: # Hyper-sensitive: Catch breakdown immediately
                 direction = -1 # Momentum Short
 
         price_distance = abs(last_close - sma) / (sma + 1e-8)
