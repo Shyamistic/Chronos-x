@@ -14,16 +14,16 @@ class TradingConfig:
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
     MIN_CONFIDENCE = 0.55 if COMPETITION_MODE else 0.50 # Higher threshold for quality trades
-    MAX_POSITION_AS_PCT_EQUITY = 5.0 if COMPETITION_MODE else 0.50  # Aggressive: 500% notional (5x leverage)
-    KELLY_FRACTION = 1.0 if COMPETITION_MODE else 0.40  # Full Kelly for max growth
-    KELLY_TREND_MULTIPLIER = 1.5 # Boost trend bets
+    MAX_POSITION_AS_PCT_EQUITY = 0.40 if COMPETITION_MODE else 0.50  # Recovery: 40% notional (0.4x leverage)
+    KELLY_FRACTION = 0.80 if COMPETITION_MODE else 0.40  # Reduced from 1.0
+    KELLY_TREND_MULTIPLIER = 1.2 # Reduced from 1.5
     KELLY_CHOP_MULTIPLIER = 0.5 # Reduced from 0.6
     MIN_KELLY_FRACTION = 0.1 # Minimum Kelly Fraction
     MAX_KELLY_FRACTION = 2.0 # Allow leverage usage via Kelly
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
-    MAX_DAILY_LOSS = -0.20 if COMPETITION_MODE else -0.03  # Loosen to -20% to accommodate 5x leverage volatility
+    MAX_DAILY_LOSS = -0.05 if COMPETITION_MODE else -0.03  # Tighten to -5% to prevent blowout
     MAX_WEEKLY_LOSS = -0.20 if COMPETITION_MODE else -0.10
     MAX_DRAWDOWN = -0.30 if COMPETITION_MODE else -0.20
     MAX_LEVERAGE = 25.0  # 25x for maximum catch-up potential
@@ -35,17 +35,17 @@ class TradingConfig:
     MAX_SLIPPAGE = 0.003  # 0.3%
     MAX_EXECUTION_LATENCY_MS = 1500  # 1.5 seconds
     MIN_VOLUME_RATIO = 0.01  # Order must be <1% of recent volume
-    MAX_RISK_PER_TRADE = 0.06 if COMPETITION_MODE else 0.02 # Allow 6% equity risk per trade to support 5x leverage
+    MAX_RISK_PER_TRADE = 0.02 # Revert to 2% standard risk
 
     # ============================================================================
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE
     # ============================================================================
-    HARDSTOP_PCT = 0.01  # Tighten to 1% to allow larger position sizes under risk limits
+    HARDSTOP_PCT = 0.02  # Revert to 2% standard hard stop
     BREAKEVEN_PROFIT_PCT = 0.0020 # 0.2% profit to strictly cover fees (0.12% roundtrip) + buffer
     
     # ATR-based adaptive stops (multipliers for ATR value)
-    ATR_STOP_MULTIPLIER = 1.0 # Very tight stops (1x ATR) for larger positions
-    ATR_TAKE_PROFIT_MULTIPLIER = 15.0 if COMPETITION_MODE else 4.0 # Moonshot targeting for huge moves
+    ATR_STOP_MULTIPLIER = 1.5 # Standard 1.5x ATR stop
+    ATR_TAKE_PROFIT_MULTIPLIER = 6.0 if COMPETITION_MODE else 4.0 # Reduced from 15.0
     ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5 # Let it breathe: Activate trailing after 1.5x ATR
     ATR_TRAILING_FLOOR_MULTIPLIER = 0.8 # Lock in profits aggressively (0.8x ATR trail)
     ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.0 # Move to breakeven after 1x ATR profit
