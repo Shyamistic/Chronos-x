@@ -151,9 +151,9 @@ class MomentumRSIAgent:
         # COMPETITION ADDITION: Momentum Breakout Logic
         # If RSI is strong and price is trending, don't wait for a dip—BUY.
         if direction == 0:
-            if rsi > 55 and last_close > sma: # Standard breakout threshold
+            if rsi > 60 and last_close > sma: # Stricter breakout threshold
                 direction = +1 # Momentum Long
-            elif rsi < 45 and last_close < sma: # Standard breakdown threshold
+            elif rsi < 40 and last_close < sma: # Stricter breakdown threshold
                 direction = -1 # Momentum Short
 
         price_distance = abs(last_close - sma) / (sma + 1e-8)
@@ -412,12 +412,12 @@ class OrderFlowAgent:
         direction = 0
         confidence = 0.0
 
-        if buy_ratio > 0.55:
+        if buy_ratio > 0.60:
             direction = +1
-            confidence = float((buy_ratio - 0.55) / 0.45)
-        elif sell_ratio > 0.55:
+            confidence = float((buy_ratio - 0.60) / 0.40)
+        elif sell_ratio > 0.60:
             direction = -1
-            confidence = float((sell_ratio - 0.55) / 0.45)
+            confidence = float((sell_ratio - 0.60) / 0.40)
 
         confidence = max(0.0, min(1.0, confidence))
 
@@ -495,10 +495,10 @@ class SentimentAgent:
 
         # New confidence logic: floor is below threshold, requires momentum to scale up.
         # This filters out noise that cannot cover fees.
-        base_confidence = 0.45 # Boost base confidence to trigger easier
+        base_confidence = 0.40 # Lower base to require real momentum
         # Scale confidence: need ~0.015% move to reach 0.55 confidence
         # 0.00015 * 1000 = 0.15 -> 0.40 + 0.15 = 0.55
-        scaled_confidence = base_confidence + (abs(self.last_score) * 500)
+        scaled_confidence = base_confidence + (abs(self.last_score) * 300)
         confidence = min(0.95, scaled_confidence)
 
         return TradingSignal(

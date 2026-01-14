@@ -91,6 +91,22 @@ class PaperTrader:
             logger.warning("The 'symbol' argument for PaperTrader is deprecated and will be ignored. The trader now operates on multiple symbols.")
 
         self.config = config or TradingConfig()
+        
+        # --- COMPETITION OVERRIDES ---
+        # Apply surgical tweaks to let trades run longer and risk slightly more
+        if getattr(self.config, "COMPETITION_MODE", False):
+            print("[PaperTrader] COMPETITION MODE DETECTED: Applying aggressive tuning overrides.")
+            # 1. Let winners run: Increase TP multiplier (10x ATR)
+            self.config.ATR_TAKE_PROFIT_MULTIPLIER = 10.0
+            # 2. Trail later: Start at 1.5x ATR profit, keep stop at 1.0x ATR distance
+            self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5
+            self.config.ATR_TRAILING_FLOOR_MULTIPLIER = 1.0
+            # 3. Increase max risk per trade to 3% (from 2%) to overcome fees
+            self.config.MAX_RISK_PER_TRADE = 0.03
+            # 4. Delay breakeven significantly to avoid noise stop-outs
+            self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 2.0
+        # -----------------------------
+
         self.execution_client = execution_client
         initial_balance = self.config.ACCOUNT_EQUITY
         self.initial_balance = initial_balance
@@ -275,7 +291,7 @@ class PaperTrader:
         if self.config.COMPETITION_MODE and regime_state.current == MarketRegime.UNKNOWN and agents["processed_candles"] > detector.lookback:
             z_score = detector.z_score if hasattr(detector, 'z_score') else 0.0
             # If z_score is significant, force a trend. Otherwise, assume REVERSAL/CHOP to enable trading.
-            if abs(z_score) > 1.0: # Use a more statistically significant threshold
+            if abs(z_score) > 0.75: # Raised to 0.75 to reduce chop entries
                 forced_regime = MarketRegime.BULL_TREND if z_score > 0 else MarketRegime.BEAR_TREND
                 print(f"[PaperTrader] [{candle.symbol}] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to z-score ({z_score:.2f}).")
                 agents["current_regime"] = forced_regime
@@ -365,6 +381,8 @@ class PaperTrader:
             agents["order_flow"].reset_window() # Reset to capture only current candle's pressure
             if total_range > 0:
                 buy_pressure = (candle.close - candle.low) / total_range
+                # Dampen pressure to avoid 100% confidence on single candles (noise reduction)
+                buy_pressure = max(0.1, min(0.9, buy_pressure))
                 # Simple heuristic: volume is split by pressure
                 buy_volume = candle.volume * buy_pressure
                 sell_volume = candle.volume * (1 - buy_pressure)
@@ -443,7 +461,7 @@ class PaperTrader:
                 strongest_signal = max(signals, key=lambda s: s.confidence)
                 
                 # If we have a strong signal, use it
-                if strongest_signal.confidence >= 0.5: 
+                if strongest_signal.confidence >= 0.6: # Increased from 0.5 to filter noise
                     print(f"[PaperTrader] COMPETITION: Ensemble {'flat' if is_flat else 'weak'} (conf={ensemble_decision.confidence:.2f}), overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
                     from backend.agents.signal_agents import TradingDecision
                     # Create a new ensemble decision based on this single agent
