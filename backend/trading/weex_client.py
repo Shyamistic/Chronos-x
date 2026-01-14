@@ -84,7 +84,10 @@ class WeexClient:
             else json.dumps(json_body, separators=(",", ":"), sort_keys=True)
         )
 
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        headers: Dict[str, str] = {
+            "Content-Type": "application/json",
+            "User-Agent": "ChronosX/1.0 (Automated Trading)"
+        }
 
         if auth:
             ts = str(int(time.time() * 1000))

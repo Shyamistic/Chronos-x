@@ -14,16 +14,16 @@ class TradingConfig:
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
     MIN_CONFIDENCE = 0.55 if COMPETITION_MODE else 0.50 # Higher threshold for quality trades
-    MAX_POSITION_AS_PCT_EQUITY = 0.40 if COMPETITION_MODE else 0.50  # 40% base equity usage
-    KELLY_FRACTION = 0.80 if COMPETITION_MODE else 0.40  # Reduced from 1.5 to 0.8
-    KELLY_TREND_MULTIPLIER = 1.2 # Reduced from 2.0
+    MAX_POSITION_AS_PCT_EQUITY = 4.0 if COMPETITION_MODE else 0.50  # Aggressive: 400% notional (4x leverage)
+    KELLY_FRACTION = 1.0 if COMPETITION_MODE else 0.40  # Full Kelly for max growth
+    KELLY_TREND_MULTIPLIER = 1.5 # Boost trend bets
     KELLY_CHOP_MULTIPLIER = 0.5 # Reduced from 0.6
     MIN_KELLY_FRACTION = 0.1 # Minimum Kelly Fraction
     MAX_KELLY_FRACTION = 2.0 # Allow leverage usage via Kelly
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
-    MAX_DAILY_LOSS = -0.05 if COMPETITION_MODE else -0.03  # Tighten to -5% to prevent blowout
+    MAX_DAILY_LOSS = -0.15 if COMPETITION_MODE else -0.03  # Loosen to -15% to accommodate 4x leverage volatility
     MAX_WEEKLY_LOSS = -0.20 if COMPETITION_MODE else -0.10
     MAX_DRAWDOWN = -0.30 if COMPETITION_MODE else -0.20
     MAX_LEVERAGE = 25.0  # 25x for maximum catch-up potential
@@ -43,10 +43,10 @@ class TradingConfig:
     BREAKEVEN_PROFIT_PCT = 0.0020 # 0.2% profit to strictly cover fees (0.12% roundtrip) + buffer
     
     # ATR-based adaptive stops (multipliers for ATR value)
-    ATR_STOP_MULTIPLIER = 1.5 # Tighter stops to cut losers fast
-    ATR_TAKE_PROFIT_MULTIPLIER = 10.0 if COMPETITION_MODE else 4.0 # Aim for massive home runs
-    ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.0 # Activate trailing stop after 1x ATR profit
-    ATR_TRAILING_FLOOR_MULTIPLIER = 0.5 # Trail at 0.5x ATR from peak
+    ATR_STOP_MULTIPLIER = 1.0 # Very tight stops (1x ATR) for larger positions
+    ATR_TAKE_PROFIT_MULTIPLIER = 15.0 if COMPETITION_MODE else 4.0 # Moonshot targeting for huge moves
+    ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5 # Let it breathe: Activate trailing after 1.5x ATR
+    ATR_TRAILING_FLOOR_MULTIPLIER = 0.8 # Lock in profits aggressively (0.8x ATR trail)
     ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.0 # Move to breakeven after 1x ATR profit
     MAX_HOLD_TIME_MINUTES = 120  # Reduce to 2 hours to improve capital turnover
     

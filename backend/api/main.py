@@ -183,6 +183,24 @@ async def panic_close_all():
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _sync_close)
 
+@app.post("/trading/sync-positions")
+async def sync_positions(positions: list[Dict[str, Any]]):
+    """
+    Manually inject open positions into the PaperTrader.
+    Useful if automatic reconciliation fails to prevent double-entry.
+    
+    Body: [{"symbol": "cmt_btcusdt", "side": "buy", "size": 0.004, "entry_price": 95238}]
+    """
+    if not tradingloop or not tradingloop.paper_trader:
+            return {"status": "error", "message": "Trading loop not active"}
+    
+    try:
+        tradingloop.paper_trader.reconcile_positions(positions)
+        tradingloop.paper_trader.reconciliation_stable = True
+        return {"status": "synced", "positions_count": len(tradingloop.paper_trader.open_positions)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 @app.get("/trading/live-status")
 async def get_trading_status() -> Dict[str, Any]:
