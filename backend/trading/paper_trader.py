@@ -142,7 +142,7 @@ class PaperTrader:
                 "portfolio": ThompsonSamplingPortfolioManager(
                     agent_ids=["momentum_rsi", "ml_classifier", "order_flow", "sentiment"]
                 ),
-                "regime_detector": RegimeDetector(lookback=1 if self.config.COMPETITION_MODE else 20),
+                "regime_detector": RegimeDetector(lookback=20), # Always use sufficient lookback for Z-score
                 "processed_candles": 0,
                 "current_regime": MarketRegime.UNKNOWN
             }
@@ -305,6 +305,9 @@ class PaperTrader:
             agents["ml"].update(candle)
             # The regime detector also benefits from this, even with a short lookback
             agents["regime_detector"].update(candle.close)
+            
+        # Set processed_candles to skip warm-up delay since we have historical data
+        agents["processed_candles"] = len(candles)
 
         # Train the ML model once after priming
         if agents["ml"] and hasattr(agents["ml"], 'train'):
