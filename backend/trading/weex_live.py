@@ -254,7 +254,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         await asyncio.gather(*prime_tasks)
         # --- END PRIMING ---
 
-        MAX_RECONCILIATION_ATTEMPTS = 20 # Increased from 5 to survive WAF/Server instability
+        MAX_RECONCILIATION_ATTEMPTS = 30 # Increased to 30 to survive persistent WAF/Server instability
         # --- RECONCILIATION START ---
         print("[WeexTradingLoop] Fetching open positions from WEEX for reconciliation...")
         reconciliation_successful = False

@@ -14,7 +14,7 @@ class TradingConfig:
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
     MIN_CONFIDENCE = 0.55 if COMPETITION_MODE else 0.50 # Higher threshold for quality trades
-    MAX_POSITION_AS_PCT_EQUITY = 4.0 if COMPETITION_MODE else 0.50  # Aggressive: 400% notional (4x leverage)
+    MAX_POSITION_AS_PCT_EQUITY = 5.0 if COMPETITION_MODE else 0.50  # Aggressive: 500% notional (5x leverage)
     KELLY_FRACTION = 1.0 if COMPETITION_MODE else 0.40  # Full Kelly for max growth
     KELLY_TREND_MULTIPLIER = 1.5 # Boost trend bets
     KELLY_CHOP_MULTIPLIER = 0.5 # Reduced from 0.6
@@ -23,7 +23,7 @@ class TradingConfig:
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
-    MAX_DAILY_LOSS = -0.15 if COMPETITION_MODE else -0.03  # Loosen to -15% to accommodate 4x leverage volatility
+    MAX_DAILY_LOSS = -0.20 if COMPETITION_MODE else -0.03  # Loosen to -20% to accommodate 5x leverage volatility
     MAX_WEEKLY_LOSS = -0.20 if COMPETITION_MODE else -0.10
     MAX_DRAWDOWN = -0.30 if COMPETITION_MODE else -0.20
     MAX_LEVERAGE = 25.0  # 25x for maximum catch-up potential
@@ -39,7 +39,7 @@ class TradingConfig:
     # ============================================================================
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE
     # ============================================================================
-    HARDSTOP_PCT = 0.02  # Fallback 2% hard stop loss on any single trade (if ATR not available)
+    HARDSTOP_PCT = 0.01  # Tighten to 1% to allow larger position sizes under risk limits
     BREAKEVEN_PROFIT_PCT = 0.0020 # 0.2% profit to strictly cover fees (0.12% roundtrip) + buffer
     
     # ATR-based adaptive stops (multipliers for ATR value)
