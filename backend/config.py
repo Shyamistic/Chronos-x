@@ -13,17 +13,17 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.40 if COMPETITION_MODE else 0.50 # Aggressive: Lower threshold to trade more often
-    MAX_POSITION_AS_PCT_EQUITY = 0.98 if COMPETITION_MODE else 0.50  # Use almost full equity
-    KELLY_FRACTION = 1.5 if COMPETITION_MODE else 0.40  # Over-betting for catch-up (War Mode)
-    KELLY_TREND_MULTIPLIER = 2.0 # Double down on trends
-    KELLY_CHOP_MULTIPLIER = 0.6 # Decrease Kelly in choppy markets
+    MIN_CONFIDENCE = 0.55 if COMPETITION_MODE else 0.50 # Higher threshold for quality trades
+    MAX_POSITION_AS_PCT_EQUITY = 0.40 if COMPETITION_MODE else 0.50  # 40% base equity usage
+    KELLY_FRACTION = 0.80 if COMPETITION_MODE else 0.40  # Reduced from 1.5 to 0.8
+    KELLY_TREND_MULTIPLIER = 1.2 # Reduced from 2.0
+    KELLY_CHOP_MULTIPLIER = 0.5 # Reduced from 0.6
     MIN_KELLY_FRACTION = 0.1 # Minimum Kelly Fraction
     MAX_KELLY_FRACTION = 2.0 # Allow leverage usage via Kelly
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
-    MAX_DAILY_LOSS = -0.10 if COMPETITION_MODE else -0.03  # Loosen to -10% to survive volatility
+    MAX_DAILY_LOSS = -0.05 if COMPETITION_MODE else -0.03  # Tighten to -5% to prevent blowout
     MAX_WEEKLY_LOSS = -0.20 if COMPETITION_MODE else -0.10
     MAX_DRAWDOWN = -0.30 if COMPETITION_MODE else -0.20
     MAX_LEVERAGE = 25.0  # 25x for maximum catch-up potential
@@ -59,7 +59,7 @@ class TradingConfig:
     # ============================================================================
     # REGIME-AWARE TRADING
     # ============================================================================
-    TRADE_IN_CHOPPY_REGIME = True  # ✅ COMPETITION: Enable trading in chop to ensure activity
+    TRADE_IN_CHOPPY_REGIME = False  # ❌ COMPETITION: Disable chop trading to save fees
     
     @property
     def MAX_POSITION_SIZE(self):

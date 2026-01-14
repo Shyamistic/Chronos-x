@@ -595,7 +595,7 @@ async def startup_event():
     # Define the portfolio of symbols for the main API-driven loop
     symbols_to_trade = [
         "cmt_btcusdt",
-        # "cmt_ethusdt", # Concentrating risk to a single market for competition
+        "cmt_ethusdt", # Enable ETH for diversification
         # "cmt_solusdt", # Concentrating risk to a single market for competition
     ]
 

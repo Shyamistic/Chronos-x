@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 # Define the portfolio of symbols to trade
 SYMBOLS_TO_TRADE = [
     "cmt_btcusdt",
-    # "cmt_ethusdt", # Concentrating risk to a single market for competition
+    "cmt_ethusdt", # Enable ETH for diversification
     # "cmt_solusdt",
 ]
 
