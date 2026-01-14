@@ -121,6 +121,10 @@ class WeexClient:
                     headers=headers,
                     timeout=self.timeout,
                 )
+                
+                if not resp.ok:
+                    print(f"[WeexClient] API Error Response: {resp.text}")
+                
                 resp.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
                 return resp.json()
             except requests.exceptions.RequestException as e:

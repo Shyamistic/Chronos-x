@@ -98,13 +98,13 @@ class PaperTrader:
             print("[PaperTrader] COMPETITION MODE DETECTED: Applying aggressive tuning overrides.")
             # 1. Let winners run: Increase TP multiplier (10x ATR)
             self.config.ATR_TAKE_PROFIT_MULTIPLIER = 10.0
-            # 2. Trail later: Start at 1.5x ATR profit, keep stop at 1.0x ATR distance
-            self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5
+            # 2. Trail later: Start at 2.0x ATR profit, keep stop at 1.0x ATR distance
+            self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER = 2.0
             self.config.ATR_TRAILING_FLOOR_MULTIPLIER = 1.0
             # 3. Increase max risk per trade to 3% (from 2%) to overcome fees
             self.config.MAX_RISK_PER_TRADE = 0.03
-            # 4. Delay breakeven significantly to avoid noise stop-outs
-            self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 2.0
+            # 4. Delay breakeven significantly (3x ATR) to avoid noise stop-outs
+            self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 3.0
         # -----------------------------
 
         self.execution_client = execution_client
@@ -221,18 +221,23 @@ class PaperTrader:
         current_atr = self.atr_history.get(candle.symbol, [0])[-1] if self.atr_history.get(candle.symbol) else None
         
         if current_atr and entry_price > 0:
+            # OPTIMIZATION: Enforce a minimum ATR floor (0.1% of price)
+            # This prevents suffocation in low volatility regimes where ATR is tiny.
+            min_atr = entry_price * 0.001
+            effective_atr = max(current_atr, min_atr)
+
             # Convert ATR to a percentage of entry price for comparison
-            atr_pct = (current_atr / entry_price)
+            atr_pct = (effective_atr / entry_price)
             
             # Adaptive Stop Loss: e.g., 2x ATR below entry
             adaptive_stop_loss_pct = self.config.ATR_STOP_MULTIPLIER * atr_pct
             if pnl_pct < -adaptive_stop_loss_pct:
-                return True, f"Adaptive Hardstop loss hit: {pnl_pct:.2%} (ATR: {current_atr:.4f})"
+                return True, f"Adaptive Hardstop loss hit: {pnl_pct:.2%} (ATR: {effective_atr:.4f})"
 
             # Adaptive Take Profit: e.g., 4x ATR above entry (2:1 R:R)
             adaptive_take_profit_pct = self.config.ATR_TAKE_PROFIT_MULTIPLIER * atr_pct
             if pnl_pct > adaptive_take_profit_pct:
-                return True, f"Adaptive Take Profit hit: {pnl_pct:.2%} (ATR: {current_atr:.4f})"
+                return True, f"Adaptive Take Profit hit: {pnl_pct:.2%} (ATR: {effective_atr:.4f})"
 
             # Adaptive Trailing Stop (Activate after 1x ATR profit, trail at 0.5x ATR from peak)
             activation_threshold_atr = self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER * atr_pct
@@ -240,12 +245,12 @@ class PaperTrader:
                 # Trail at a certain percentage below the highest PnL % achieved
                 trail_floor_pct = position.highest_pnl_pct - (self.config.ATR_TRAILING_FLOOR_MULTIPLIER * atr_pct)
                 if pnl_pct < trail_floor_pct:
-                    return True, f"Adaptive Trailing Stop hit: {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%}, ATR: {current_atr:.4f})"
+                    return True, f"Adaptive Trailing Stop hit: {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%}, ATR: {effective_atr:.4f})"
 
             # Adaptive Breakeven Protection (Move stop to breakeven + small profit after 1x ATR profit)
             if position.highest_pnl_pct >= self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER * atr_pct:
                 if pnl_pct <= self.config.BREAKEVEN_PROFIT_PCT: # Small profit to cover fees
-                    return True, f"Adaptive Breakeven protection hit (Peak: {position.highest_pnl_pct:.2%}, ATR: {current_atr:.4f})"
+                    return True, f"Adaptive Breakeven protection hit (Peak: {position.highest_pnl_pct:.2%}, ATR: {effective_atr:.4f})"
         else:
             # --- Fallback to Fixed Stop/Take-Profit if ATR not available ---
             if pnl_pct < -self.config.HARDSTOP_PCT:
@@ -854,7 +859,24 @@ class PaperTrader:
             entry_price = float(pos.get("averageOpenPrice", 0) or pos.get("openPrice", 0))
             
             if symbol in self.open_positions:
-                print(f"[PaperTrader] CRITICAL WARNING: HEDGED STATE DETECTED for {symbol}. You have both Long and Short. This bleeds fees. Please manually close one side.")
+                existing = self.open_positions[symbol]
+                print(f"[PaperTrader] CRITICAL WARNING: HEDGED STATE DETECTED for {symbol}. Found {side} while holding {existing.side}.")
+                
+                # COMPETITION LOGIC: Auto-resolve hedge by closing the newly found position to maintain single-slot state
+                if self.execution_client:
+                    print(f"[PaperTrader] RECONCILIATION: Auto-closing conflicting {side} position for {symbol} to enforce single-mode.")
+                    try:
+                        # 3=Close Long, 4=Close Short
+                        close_type = "3" if side == "buy" else "4"
+                        self.execution_client.place_order(
+                            symbol=symbol,
+                            size=f"{size:.{get_precision(symbol)}f}",
+                            type_=close_type,
+                            price="0",
+                            match_price="1"
+                        )
+                    except Exception as e:
+                        print(f"[PaperTrader] Failed to auto-close hedged position: {e}")
                 continue
                 
             print(f"[PaperTrader] Adopting orphan position: {symbol} {side} {size} @ {entry_price}")
