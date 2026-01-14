@@ -601,19 +601,10 @@ class EnsembleAgent:
 
         # --- Disagreement Penalty ---
         # Penalize confidence if agents disagree on direction
-        long_votes = sum(1 for s in active if s.direction > 0)
-        short_votes = sum(1 for s in active if s.direction < 0)
+        # NOTE: 'raw' score already penalizes disagreement by averaging signed vectors.
+        # We disable explicit penalty to avoid double-punishment in competition.
+        confidence = base_confidence
         disagreement_penalty = 0.0
-        
-        if long_votes > 0 and short_votes > 0:
-            # Calculate a penalty score (0-1)
-            disagreement_score = min(long_votes, short_votes) / max(long_votes, short_votes)
-            # Apply a penalty factor (e.g., 0.5)
-            disagreement_penalty = 0.10 * disagreement_score # Reduced penalty for competition
-            confidence = base_confidence * (1 - disagreement_penalty)
-            print(f"[Ensemble] Disagreement detected ({long_votes}L/{short_votes}S). Penalty: {disagreement_penalty:.2f}")
-        else:
-            confidence = base_confidence
 
         print(
             f"[Ensemble] FINAL dir={direction}, conf={confidence:.3f}, raw={raw:.4f}"
@@ -623,5 +614,5 @@ class EnsembleAgent:
             direction=direction,
             confidence=confidence,
             agent_signals=active,
-            metadata={"raw_score": float(raw), "disagreement_penalty": disagreement_penalty},
+            metadata={"raw_score": float(raw), "disagreement_penalty": 0.0},
         )

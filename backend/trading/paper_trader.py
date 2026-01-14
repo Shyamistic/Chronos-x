@@ -433,19 +433,25 @@ class PaperTrader:
         agents["ensemble"].weights = weights
         ensemble_decision = agents["ensemble"].combine(signals)
 
-        # COMPETITION OVERRIDE: If ensemble is flat, let the strongest single agent take over
-        if self.config.COMPETITION_MODE and ensemble_decision.direction == 0 and signals:
-            # Find the signal with the highest confidence
-            strongest_signal = max(signals, key=lambda s: s.confidence)
-            if strongest_signal.confidence >= 0.5: # Lowered threshold for aggression
-                print(f"[PaperTrader] COMPETITION: Ensemble flat, overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
-                from backend.agents.signal_agents import TradingDecision
-                # Create a new ensemble decision based on this single agent
-                ensemble_decision = TradingDecision(
-                    direction=strongest_signal.direction,
-                    confidence=strongest_signal.confidence,
-                    agent_signals=[strongest_signal] # Log that this was an override
-                )
+        # COMPETITION OVERRIDE: If ensemble is flat OR weak, let the strongest single agent take over
+        if self.config.COMPETITION_MODE and signals:
+            is_flat = ensemble_decision.direction == 0
+            is_weak = ensemble_decision.confidence < self.config.MIN_CONFIDENCE
+            
+            if is_flat or is_weak:
+                # Find the signal with the highest confidence
+                strongest_signal = max(signals, key=lambda s: s.confidence)
+                
+                # If we have a strong signal, use it
+                if strongest_signal.confidence >= 0.5: 
+                    print(f"[PaperTrader] COMPETITION: Ensemble {'flat' if is_flat else 'weak'} (conf={ensemble_decision.confidence:.2f}), overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
+                    from backend.agents.signal_agents import TradingDecision
+                    # Create a new ensemble decision based on this single agent
+                    ensemble_decision = TradingDecision(
+                        direction=strongest_signal.direction,
+                        confidence=strongest_signal.confidence,
+                        agent_signals=[strongest_signal] # Log that this was an override
+                    )
 
         # Cache for external consumers (WeexTradingLoop)
         self.last_ensemble_decision = ensemble_decision
