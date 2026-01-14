@@ -177,7 +177,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
         )
         TradingConfig.print_config()
 
-    async def _prime_symbol(self, symbol: str, num_candles: int = 200):
+    async def _prime_symbol(self, symbol: str, num_candles: int = 300):
         """Fetch historical data to warm up agents."""
         try:
             print(f"[WeexTradingLoop] Priming agents for {symbol} with {num_candles} historical candles...")

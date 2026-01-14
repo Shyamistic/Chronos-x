@@ -357,6 +357,7 @@ class PaperTrader:
         # Estimate buy/sell volume from candle data to make OrderFlowAgent functional
         try:
             total_range = candle.high - candle.low
+            self.order_flow_agent.reset_window() # Reset to capture only current candle's pressure
             if total_range > 0:
                 buy_pressure = (candle.close - candle.low) / total_range
                 # Simple heuristic: volume is split by pressure
@@ -431,7 +432,7 @@ class PaperTrader:
         if self.config.COMPETITION_MODE and ensemble_decision.direction == 0 and signals:
             # Find the signal with the highest confidence
             strongest_signal = max(signals, key=lambda s: s.confidence)
-            if strongest_signal.confidence >= 0.6: # User specified threshold
+            if strongest_signal.confidence >= 0.5: # Lowered threshold for aggression
                 print(f"[PaperTrader] COMPETITION: Ensemble flat, overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
                 from backend.agents.signal_agents import TradingDecision
                 # Create a new ensemble decision based on this single agent
@@ -472,7 +473,7 @@ class PaperTrader:
             
             # Pyramiding (Competition Mode): Add to winner if confidence is high
             # Gated by reconciliation status to prevent state-blind pyramiding
-            elif self.config.COMPETITION_MODE and self.reconciliation_stable and ensemble_decision.confidence > 0.6:
+            elif self.config.COMPETITION_MODE and self.reconciliation_stable and ensemble_decision.confidence > 0.5:
                 # Only pyramid if we are in profit and in the same direction
                 # STEP 3: MANDATORY PYRAMIDING ON WINNERS
                 is_strong_regime = regime.value in ("bull_trend", "bear_trend")

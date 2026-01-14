@@ -144,9 +144,17 @@ class MomentumRSIAgent:
 
         # Mean-reversion signals: RSI extreme + price movement
         if rsi < 48 and last_close > sma:
-            direction = +1
+            direction = +1 # Buy the dip
         elif rsi > 52 and last_close < sma:
-            direction = -1
+            direction = -1 # Sell the rally
+
+        # COMPETITION ADDITION: Momentum Breakout Logic
+        # If RSI is strong and price is trending, don't wait for a dip—BUY.
+        if direction == 0:
+            if rsi > 55 and last_close > sma:
+                direction = +1 # Momentum Long
+            elif rsi < 45 and last_close < sma:
+                direction = -1 # Momentum Short
 
         price_distance = abs(last_close - sma) / (sma + 1e-8)
         rsi_strength = abs(rsi - 50) / 50.0  # 0-1
@@ -484,7 +492,7 @@ class SentimentAgent:
 
         # New confidence logic: floor is below threshold, requires momentum to scale up.
         # This filters out noise that cannot cover fees.
-        base_confidence = 0.40
+        base_confidence = 0.45 # Boost base confidence to trigger easier
         # Scale confidence: need ~0.015% move to reach 0.55 confidence
         # 0.00015 * 1000 = 0.15 -> 0.40 + 0.15 = 0.55
         scaled_confidence = base_confidence + (abs(self.last_score) * 500)
@@ -598,7 +606,7 @@ class EnsembleAgent:
             # Calculate a penalty score (0-1)
             disagreement_score = min(long_votes, short_votes) / max(long_votes, short_votes)
             # Apply a penalty factor (e.g., 0.5)
-            disagreement_penalty = 0.25 * disagreement_score
+            disagreement_penalty = 0.10 * disagreement_score # Reduced penalty for competition
             confidence = base_confidence * (1 - disagreement_penalty)
             print(f"[Ensemble] Disagreement detected ({long_votes}L/{short_votes}S). Penalty: {disagreement_penalty:.2f}")
         else:

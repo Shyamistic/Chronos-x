@@ -13,20 +13,20 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.50 if COMPETITION_MODE else 0.50 # Lowered slightly to encourage activity
-    MAX_POSITION_AS_PCT_EQUITY = 0.90 if COMPETITION_MODE else 0.50  # Allow near-full deployment
-    KELLY_FRACTION = 0.80 if COMPETITION_MODE else 0.40  # Aggressive sizing
-    KELLY_TREND_MULTIPLIER = 1.2 # Increase Kelly in strong trends
+    MIN_CONFIDENCE = 0.40 if COMPETITION_MODE else 0.50 # Aggressive: Lower threshold to trade more often
+    MAX_POSITION_AS_PCT_EQUITY = 0.98 if COMPETITION_MODE else 0.50  # Use almost full equity
+    KELLY_FRACTION = 1.5 if COMPETITION_MODE else 0.40  # Over-betting for catch-up (War Mode)
+    KELLY_TREND_MULTIPLIER = 2.0 # Double down on trends
     KELLY_CHOP_MULTIPLIER = 0.6 # Decrease Kelly in choppy markets
     MIN_KELLY_FRACTION = 0.1 # Minimum Kelly Fraction
-    MAX_KELLY_FRACTION = 0.8 # Maximum Kelly Fraction
+    MAX_KELLY_FRACTION = 2.0 # Allow leverage usage via Kelly
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
     MAX_DAILY_LOSS = -0.10 if COMPETITION_MODE else -0.03  # Loosen to -10% to survive volatility
     MAX_WEEKLY_LOSS = -0.20 if COMPETITION_MODE else -0.10
     MAX_DRAWDOWN = -0.30 if COMPETITION_MODE else -0.20
-    MAX_LEVERAGE = 10.0  # 10x (was 2x)
+    MAX_LEVERAGE = 25.0  # 25x for maximum catch-up potential
     MARGIN_BUFFER = 0.05  # 5% safety margin
     
     # ============================================================================
@@ -43,8 +43,8 @@ class TradingConfig:
     BREAKEVEN_PROFIT_PCT = 0.0020 # 0.2% profit to strictly cover fees (0.12% roundtrip) + buffer
     
     # ATR-based adaptive stops (multipliers for ATR value)
-    ATR_STOP_MULTIPLIER = 2.0 # 2x ATR for stop loss
-    ATR_TAKE_PROFIT_MULTIPLIER = 6.0 if COMPETITION_MODE else 4.0 # Aim for home runs (3:1 R:R)
+    ATR_STOP_MULTIPLIER = 1.5 # Tighter stops to cut losers fast
+    ATR_TAKE_PROFIT_MULTIPLIER = 10.0 if COMPETITION_MODE else 4.0 # Aim for massive home runs
     ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.0 # Activate trailing stop after 1x ATR profit
     ATR_TRAILING_FLOOR_MULTIPLIER = 0.5 # Trail at 0.5x ATR from peak
     ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.0 # Move to breakeven after 1x ATR profit
