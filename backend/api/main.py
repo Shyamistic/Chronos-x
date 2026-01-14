@@ -362,19 +362,25 @@ async def get_agent_performance() -> Dict[str, Any]:
         }
     
     paper_trader = tradingloop.paper_trader
-    portfolio_manager = paper_trader.portfolio_manager
     
-    # Get current weights and performance stats from the Thompson Sampling manager
+    # Aggregate stats from all symbol-specific portfolio managers
     agent_stats = {}
-    weights = portfolio_manager.current_weights()
-    for agent_id in portfolio_manager.agent_ids:
-        stats = portfolio_manager.get_agent_stats(agent_id)
-        agent_stats[agent_id] = {
-            "current_weight": weights.get(agent_id, 0.0),
-            "trades": stats.get("trades", 0),
-            "total_pnl": stats.get("total_pnl", 0.0),
-            "avg_pnl": stats.get("avg_pnl", 0.0),
-        }
+    
+    # Iterate over all initialized symbols
+    for symbol, agents in paper_trader.agents_by_symbol.items():
+        pm = agents.get("portfolio")
+        if not pm: continue
+        
+        # Get snapshot from this PM
+        snapshot = pm.get_stats_snapshot()
+        for stat in snapshot:
+            aid = stat["agent_id"]
+            if aid not in agent_stats:
+                agent_stats[aid] = {"trades": 0, "total_pnl": 0.0, "wins": 0}
+            
+            agent_stats[aid]["trades"] += stat["total_trades"]
+            agent_stats[aid]["total_pnl"] += stat["cum_reward"] # Using reward as proxy for PnL metric
+            agent_stats[aid]["wins"] += stat["wins"]
 
     return {"status": "running", "agents": agent_stats}
 

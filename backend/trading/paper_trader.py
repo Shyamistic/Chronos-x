@@ -106,28 +106,8 @@ class PaperTrader:
         # Governance
         self.governance = GovernanceEngine(config=self.config)
 
-        # Agents
-        self.momentum_agent = MomentumRSIAgent()
-        self.ml_agent = MLClassifierAgent()
-        self.order_flow_agent = OrderFlowAgent()
-        self.sentiment_agent = SentimentAgent()
-        self.ensemble = EnsembleAgent()
-
-        # Portfolio manager with Thompson Sampling
-        self.portfolio_manager = ThompsonSamplingPortfolioManager(
-            agent_ids=[
-                "momentum_rsi",
-                "ml_classifier",
-                "order_flow",
-                "sentiment",
-            ]
-        )
-
-        # Regime detection
-        # In competition, we can't wait for warm-up. Set lookback to a minimum.
-        lookback_period = 1 if self.config.COMPETITION_MODE else 20
-        self.regime_detector = RegimeDetector(lookback=lookback_period)
-        self.current_regime = MarketRegime.UNKNOWN
+        # Agents (Per-Symbol Storage)
+        self.agents_by_symbol: Dict[str, Dict] = {}
         
         # ATR for adaptive stops
         self.atr_history: Dict[str, List[float]] = {} # Store ATR per symbol
@@ -149,6 +129,24 @@ class PaperTrader:
         self.high_conviction_trades = 0
         self.processed_candles_count = 0 # Track processed candles for regime warm-up
         self.reconciliation_stable = False # Set by WeexTradingLoop
+
+    def _get_agents(self, symbol: str) -> Dict:
+        """Retrieve or initialize agents for a specific symbol."""
+        if symbol not in self.agents_by_symbol:
+            self.agents_by_symbol[symbol] = {
+                "momentum": MomentumRSIAgent(),
+                "ml": MLClassifierAgent(),
+                "order_flow": OrderFlowAgent(),
+                "sentiment": SentimentAgent(),
+                "ensemble": EnsembleAgent(),
+                "portfolio": ThompsonSamplingPortfolioManager(
+                    agent_ids=["momentum_rsi", "ml_classifier", "order_flow", "sentiment"]
+                ),
+                "regime_detector": RegimeDetector(lookback=1 if self.config.COMPETITION_MODE else 20),
+                "processed_candles": 0,
+                "current_regime": MarketRegime.UNKNOWN
+            }
+        return self.agents_by_symbol[symbol]
 
     # ================================================================ #
     # Account state helpers
@@ -266,30 +264,31 @@ class PaperTrader:
     # Regime detection
     # ================================================================ #
 
-    def _detect_regime(self, candle: Candle) -> MarketRegime:
+    def _detect_regime(self, candle: Candle, agents: Dict) -> MarketRegime:
         """Detect current market regime."""
-        self.processed_candles_count += 1
-        self.regime_detector.update(candle.close)
-        regime_state = self.regime_detector.detect()
+        detector = agents["regime_detector"]
+        agents["processed_candles"] += 1
+        detector.update(candle.close)
+        regime_state = detector.detect()
 
         # AGGRESSIVE REGIME FORCING FOR COMPETITION: Never stay in UNKNOWN after warm-up
-        if self.config.COMPETITION_MODE and regime_state.current == MarketRegime.UNKNOWN and self.processed_candles_count > self.regime_detector.lookback:
-            z_score = self.regime_detector.z_score if hasattr(self.regime_detector, 'z_score') else 0.0
+        if self.config.COMPETITION_MODE and regime_state.current == MarketRegime.UNKNOWN and agents["processed_candles"] > detector.lookback:
+            z_score = detector.z_score if hasattr(detector, 'z_score') else 0.0
             # If z_score is significant, force a trend. Otherwise, assume REVERSAL/CHOP to enable trading.
             if abs(z_score) > 1.0: # Use a more statistically significant threshold
                 forced_regime = MarketRegime.BULL_TREND if z_score > 0 else MarketRegime.BEAR_TREND
-                print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to z-score ({z_score:.2f}).")
-                self.current_regime = forced_regime
+                print(f"[PaperTrader] [{candle.symbol}] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to z-score ({z_score:.2f}).")
+                agents["current_regime"] = forced_regime
             else:
-                print(f"[PaperTrader] COMPETITION: Forced regime from UNKNOWN to CHOP due to weak z-score ({z_score:.2f}).")
-                self.current_regime = MarketRegime("chop") # Use CHOP as a safe, tradable fallback
+                print(f"[PaperTrader] [{candle.symbol}] COMPETITION: Forced regime from UNKNOWN to CHOP due to weak z-score ({z_score:.2f}).")
+                agents["current_regime"] = MarketRegime("chop") # Use CHOP as a safe, tradable fallback
         else:
             # Use the detector's classification if it's not UNKNOWN, or if not in aggressive competition mode.
-            self.current_regime = regime_state.current
+            agents["current_regime"] = regime_state.current
 
-        self.portfolio_manager.set_regime(self.current_regime)
+        agents["portfolio"].set_regime(agents["current_regime"])
 
-        return self.current_regime
+        return agents["current_regime"]
 
     # ================================================================ #
     # Main simulation APIs
@@ -298,20 +297,21 @@ class PaperTrader:
     async def prime_agents(self, symbol: str, candles: List[Candle]):
         """Warm up agents with historical data."""
         print(f"[PaperTrader] Priming agents for {symbol} with {len(candles)} candles...")
+        agents = self._get_agents(symbol)
         
         # Prime agents that need history
         for candle in candles:
-            self.momentum_agent.update(candle)
-            self.ml_agent.update(candle)
+            agents["momentum"].update(candle)
+            agents["ml"].update(candle)
             # The regime detector also benefits from this, even with a short lookback
-            self.regime_detector.update(candle.close)
+            agents["regime_detector"].update(candle.close)
 
         # Train the ML model once after priming
-        if self.ml_agent and hasattr(self.ml_agent, 'train'):
+        if agents["ml"] and hasattr(agents["ml"], 'train'):
             df = pd.DataFrame([asdict(c) for c in candles])
             if not df.empty:
                 try:
-                    self.ml_agent.train(df)
+                    agents["ml"].train(df)
                 except Exception as e:
                     print(f"[PaperTrader] ML Agent training failed during priming: {e}")
 
@@ -345,42 +345,44 @@ class PaperTrader:
         2. If flat, check for new entries.
         3. Apply governance to all decisions.
         """
+        agents = self._get_agents(candle.symbol)
+        
         # Detect regime
-        regime = self._detect_regime(candle)
-        print(f"[PaperTrader] Candle {candle.timestamp} close={candle.close}, regime={regime.value}")
+        regime = self._detect_regime(candle, agents)
+        print(f"[PaperTrader] [{candle.symbol}] Candle {candle.timestamp} close={candle.close}, regime={regime.value}")
 
         # Update all agents with the new candle data
-        self.momentum_agent.update(candle)
-        self.sentiment_agent.update(candle)
+        agents["momentum"].update(candle)
+        agents["sentiment"].update(candle)
         
         # --- NEW: Order Flow Estimation ---
         # Estimate buy/sell volume from candle data to make OrderFlowAgent functional
         try:
             total_range = candle.high - candle.low
-            self.order_flow_agent.reset_window() # Reset to capture only current candle's pressure
+            agents["order_flow"].reset_window() # Reset to capture only current candle's pressure
             if total_range > 0:
                 buy_pressure = (candle.close - candle.low) / total_range
                 # Simple heuristic: volume is split by pressure
                 buy_volume = candle.volume * buy_pressure
                 sell_volume = candle.volume * (1 - buy_pressure)
-                self.order_flow_agent.update_volume(buy_volume, sell_volume)
+                agents["order_flow"].update_volume(buy_volume, sell_volume)
         except Exception as e:
             print(f"[PaperTrader] Order flow estimation failed: {e}")
         # --- END Order Flow Estimation ---
 
-        self.ml_agent.update(candle)  # Also update ML agent
+        agents["ml"].update(candle)  # Also update ML agent
         self._update_equity(mark_price=candle.close, symbol=candle.symbol)
         
         # Calculate ATR for adaptive stops
         if candle.symbol not in self.atr_history:
             self.atr_history[candle.symbol] = []
 
-        if len(self.momentum_agent.history) >= self.atr_period:
+        if len(agents["momentum"].history) >= self.atr_period:
             # Ensure history is for the current symbol if momentum_agent is global
             # Assuming momentum_agent.history is a list of candles for the current symbol, or a dict of lists
-            highs = [c.high for c in self.momentum_agent.history[-self.atr_period:]]
-            lows = [c.low for c in self.momentum_agent.history[-self.atr_period:]]
-            closes = [c.close for c in self.momentum_agent.history[-self.atr_period:]]
+            highs = [c.high for c in agents["momentum"].history[-self.atr_period:]]
+            lows = [c.low for c in agents["momentum"].history[-self.atr_period:]]
+            closes = [c.close for c in agents["momentum"].history[-self.atr_period:]]
             
             tr_values = []
             for i in range(self.atr_period):
@@ -393,23 +395,23 @@ class PaperTrader:
 
         # --- Generate Ensemble Decision (needed for both exits and entries) ---
         signals = []
-        sig_momentum = self.momentum_agent.generate()
+        sig_momentum = agents["momentum"].generate()
         if sig_momentum: signals.append(sig_momentum)
         
-        sig_orderflow = self.order_flow_agent.generate()
+        sig_orderflow = agents["order_flow"].generate()
         if sig_orderflow: signals.append(sig_orderflow)
 
-        sig_sentiment = self.sentiment_agent.generate()
+        sig_sentiment = agents["sentiment"].generate()
         if sig_sentiment: signals.append(sig_sentiment)
 
         # ML Agent signal generation (from Fix #3)
-        sig_ml = self.ml_agent.generate()
+        sig_ml = agents["ml"].generate()
         if sig_ml: signals.append(sig_ml)
 
         # Fallback signal
         if not any(s.direction != 0 for s in signals):
-            if len(self.momentum_agent.history) >= 20:
-                closes = [c.close for c in self.momentum_agent.history[-20:]]
+            if len(agents["momentum"].history) >= 20:
+                closes = [c.close for c in agents["momentum"].history[-20:]]
                 sma20 = sum(closes) / len(closes)
                 trend_dir = 1 if candle.close > sma20 else -1
                 # Set a fixed, reasonable confidence for the fallback signal
@@ -424,9 +426,9 @@ class PaperTrader:
                 signals.append(trend_sig)
 
         # Get dynamic weights and combine signals
-        weights = self.portfolio_manager.sample_weights_for_regime(regime) # Pass equity for bandit
-        self.ensemble.weights = weights
-        ensemble_decision = self.ensemble.combine(signals)
+        weights = agents["portfolio"].sample_weights_for_regime(regime) # Pass equity for bandit
+        agents["ensemble"].weights = weights
+        ensemble_decision = agents["ensemble"].combine(signals)
 
         # COMPETITION OVERRIDE: If ensemble is flat, let the strongest single agent take over
         if self.config.COMPETITION_MODE and ensemble_decision.direction == 0 and signals:
@@ -504,9 +506,11 @@ class PaperTrader:
         if allow_entry:
             # Handle UNKNOWN regime during warm-up or if detector is truly stuck
             if regime == MarketRegime.UNKNOWN:
-                if self.processed_candles_count < self.regime_detector.lookback:
-                    print(f"[PaperTrader] WARM-UP: Trading in UNKNOWN regime with conservative sizing (candle {self.processed_candles_count}/{self.regime_detector.lookback}).")
+                if agents["processed_candles"] < agents["regime_detector"].lookback:
+                    print(f"[PaperTrader] WARM-UP: Trading in UNKNOWN regime with conservative sizing (candle {agents['processed_candles']}/{agents['regime_detector'].lookback}).")
                     # Allow to proceed, but sizing will be minimal due to default Kelly and low confidence
+                elif ensemble_decision.confidence > 0.8:
+                    print(f"[PaperTrader] COMPETITION: OVERRIDE UNKNOWN regime due to high confidence ({ensemble_decision.confidence:.2f})")
                 else:
                     print("[PaperTrader] COMPETITION RULE: Trade blocked in persistent UNKNOWN regime after warm-up.")
                     return
@@ -548,7 +552,7 @@ class PaperTrader:
                 size_multiplier = 3.0
             
             # Apply an additional penalty for UNKNOWN regime during warm-up
-            if regime == MarketRegime.UNKNOWN and self.processed_candles_count < self.regime_detector.lookback:
+            if regime == MarketRegime.UNKNOWN and agents["processed_candles"] < agents["regime_detector"].lookback:
                 scaled_size_usdt = base_size_usdt * 0.2 # Very conservative sizing during warm-up
             else:
                 scaled_size_usdt = base_size_usdt * size_multiplier
@@ -768,8 +772,9 @@ class PaperTrader:
         self.recent_pnls.append(pnl)
 
         # Distribute the result to all contributing agents for the bandit to learn
+        agents = self._get_agents(trade.symbol)
         for agent_id in trade.contributing_agents:
-            self.portfolio_manager.record_trade_result(
+            agents["portfolio"].record_trade_result(
                 agent_id=agent_id,
                 pnl=pnl,
                 position_size=trade.size,
