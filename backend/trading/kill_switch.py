@@ -48,26 +48,37 @@ def kill_switch():
             
             sizes = SIZE_LADDER.get(symbol, [])
             for size in sizes:
-                try:
-                    print(f"  > Sending Close {side_name} {symbol} {size}...", end=" ")
-                    resp = client.place_order(
-                        symbol=symbol,
-                        size=size,
-                        type_=close_type,
-                        price="0",
-                        match_price="1" # Market Order
-                    )
-                    # If we get here, it might have worked
-                    print(f"✅ Sent. Response: {resp}")
-                    time.sleep(0.2)
-                except Exception as e:
-                    # Check if error is "Position not enough" (expected for wrong side/size)
-                    err_str = str(e)
-                    if "position" in err_str.lower() and "not" in err_str.lower():
-                        print(f"❌ (No position/Size too big)")
-                    else:
-                        print(f"❌ Error: {e}")
-                    time.sleep(0.1)
+                # Retry loop for specific size to handle locks
+                for retry_idx in range(3):
+                    try:
+                        print(f"  > Sending Close {side_name} {symbol} {size}...", end=" ")
+                        resp = client.place_order(
+                            symbol=symbol,
+                            size=size,
+                            type_=close_type,
+                            price="0",
+                            match_price="1" # Market Order
+                        )
+                        print(f"✅ Sent. Response: {resp}")
+                        time.sleep(0.2)
+                        break # Success, move to next size
+                    except Exception as e:
+                        err_str = str(e)
+                        # DETECT LOCK: If error is 40015 (Pending Orders), cancel and retry
+                        if "40015" in err_str or "position side invalid" in err_str:
+                            print(f"❌ LOCKED (40015). Cancelling orders & waiting 2s (Attempt {retry_idx+1})...")
+                            try:
+                                client.cancel_all_orders(symbol)
+                            except: pass
+                            time.sleep(2.0) # Wait longer for cancel to propagate
+                            continue # Retry this size
+                        
+                        # Ignore "Position not enough" (expected)
+                        if "position" in err_str.lower() and "not" in err_str.lower():
+                            print(f"❌ (No position/Size too big)")
+                        else:
+                            print(f"❌ Error: {e}")
+                        break # Don't retry other errors
 
     print("\n⚠️  KILL SWITCH COMPLETE ⚠️")
     print("Check WEEX App/Website to verify all positions are closed.")
