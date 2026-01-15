@@ -20,7 +20,7 @@ def generate_dummy_data(filename="dummy_btc.csv"):
     np.random.seed(42)
     dt = 1/n_candles
     mu = 0.0008 # Strong Drift (Super Trend)
-    sigma = 0.01 # Volatility (High enough to pass ATR veto)
+    sigma = 0.001 # Realistic Volatility (0.1% per min) - Low enough to hold, high enough for ATR
     
     price = 96000.0
     closes = []

@@ -614,6 +614,7 @@ class TrendBiasAgent:
         self.history: List[Candle] = []
         self.adx = 0.0
         self.hurst = 0.5
+        self.gk_vol = 0.0
         self.period = 14
 
     def update(self, candle: Candle):
@@ -624,6 +625,23 @@ class TrendBiasAgent:
         
         self._calculate_adx()
         self._calculate_hurst()
+        self._calculate_gk_volatility()
+
+    def _calculate_gk_volatility(self):
+        """
+        Calculate Garman-Klass Volatility (Institutional Grade).
+        Uses OHLC data for better variance estimation than Close-Close.
+        """
+        if not self.history:
+            return
+        c = self.history[-1]
+        # 0.5 * ln(H/L)^2 - (2*ln(2)-1) * ln(C/O)^2
+        try:
+            log_hl = np.log(c.high / c.low) if c.low > 0 else 0
+            log_co = np.log(c.close / c.open) if c.open > 0 else 0
+            self.gk_vol = np.sqrt(0.5 * (log_hl ** 2) - (2 * np.log(2) - 1) * (log_co ** 2))
+        except:
+            self.gk_vol = 0.0
 
     def _calculate_hurst(self):
         """
@@ -717,8 +735,9 @@ class TrendBiasAgent:
         # SOPHISTICATED FILTER:
         # 1. ADX > 20: Trend Strength
         # 2. Hurst > 0.45: Not Mean Reverting (allow slight noise, but block hard chop)
-        if self.adx < 20 or self.hurst < 0.45:
-            return TradingSignal(self.agent_id, 0, 0.0, metadata={"adx": self.adx, "hurst": self.hurst})
+        # 3. GK Vol < 0.005: Avoid extreme volatility (whipsaw protection)
+        if self.adx < 20 or self.hurst < 0.45 or self.gk_vol > 0.005:
+            return TradingSignal(self.agent_id, 0, 0.0, metadata={"adx": self.adx, "hurst": self.hurst, "gk_vol": self.gk_vol})
 
         if regime == "bull_trend":
             # RSI not ultra-overbought yet, and flow is buying
@@ -734,13 +753,13 @@ class TrendBiasAgent:
                 confidence = 0.95 if self.adx > 30 else 0.85
 
         if direction != 0:
-            print(f"[TrendBias] SIGNAL dir={direction} (Regime={regime}, RSI={rsi:.1f}, Flow={max(buy_ratio, sell_ratio):.2f}, ADX={self.adx:.1f}, H={self.hurst:.2f})")
+            print(f"[TrendBias] SIGNAL dir={direction} (Regime={regime}, RSI={rsi:.1f}, Flow={max(buy_ratio, sell_ratio):.2f}, ADX={self.adx:.1f}, H={self.hurst:.2f}, GK={self.gk_vol:.5f})")
         
         return TradingSignal(
             agent_id=self.agent_id,
             direction=direction,
             confidence=confidence,
-            metadata={"adx": self.adx, "hurst": self.hurst}
+            metadata={"adx": self.adx, "hurst": self.hurst, "gk_vol": self.gk_vol}
         )
 
 

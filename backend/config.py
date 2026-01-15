@@ -23,7 +23,7 @@ class TradingConfig:
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
-    MAX_DAILY_LOSS = -0.02 if COMPETITION_MODE else -0.03  # Tighten to -2% to prevent blowout
+    MAX_DAILY_LOSS = -0.05 if COMPETITION_MODE else -0.03  # Relax to -5% to allow recovery
     MAX_WEEKLY_LOSS = -0.20 if COMPETITION_MODE else -0.10
     MAX_DRAWDOWN = -0.30 if COMPETITION_MODE else -0.20
     MAX_LEVERAGE = 25.0  # 25x for maximum catch-up potential
