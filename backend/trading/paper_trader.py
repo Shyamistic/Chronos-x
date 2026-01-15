@@ -499,6 +499,20 @@ class PaperTrader:
             if (is_long and new_direction == -1) or (not is_long and new_direction == 1):
                 # Before closing, check if the flip is due to low confidence.
                 # If confidence is very low, it might be noise, so don't flip aggressively.
+                
+                # ANTI-CHURN LOGIC: Calculate hold time and PnL
+                hold_time_minutes = (candle.timestamp - current_position.timestamp).total_seconds() / 60
+                pnl_pct = ((candle.close - current_position.entry_price) / current_position.entry_price) * (1 if is_long else -1)
+
+                # Base flip threshold
+                flip_threshold = self.config.MIN_CONFIDENCE + 0.2
+                if regime.value == 'chop':
+                    flip_threshold += 0.15
+                
+                # HYSTERESIS: If trade is young (< 15 mins) and not in danger (PnL > -0.5%), require overwhelming evidence (0.85+) to flip
+                if hold_time_minutes < 15 and pnl_pct > -0.005:
+                    flip_threshold = max(flip_threshold, 0.85)
+
                 if ensemble_decision.confidence < flip_threshold:
                     print(f"[PaperTrader] SIGNAL FLIP: Suppressing due to low confidence/young trade (Conf: {ensemble_decision.confidence:.2f} < Threshold: {flip_threshold:.2f}, Hold: {int(hold_time_minutes)}m).")
                     return
@@ -721,9 +735,14 @@ class PaperTrader:
                             "size": str(final_size),
                             "price": str(price),
                             "timestamp": int(timestamp.timestamp() * 1000),
-                            "ai_reason": governance_reason or "Ensemble Signal",
+                            # REQUIRED FIELDS FOR COMPETITION COMPLIANCE
+                            "model": "ChronosX-Ensemble",
+                            "input": f"Regime: {regime}, Confidence: {ensemble_confidence:.2f}",
+                            "output": f"Open {side} {final_size}",
+                            "explanation": governance_reason or "High conviction ensemble signal",
+                            "stage": "production",
+                            # Legacy/Optional
                             "confidence": str(ensemble_confidence),
-                            "regime": regime
                         }
                         self.execution_client.upload_ai_log(ai_log)
                     except Exception as e:
@@ -829,8 +848,12 @@ class PaperTrader:
                             "size": f"{position_to_close.size:.{get_precision(symbol)}f}",
                             "price": str(exit_price),
                             "timestamp": int(timestamp.timestamp() * 1000),
-                            "ai_reason": exit_reason,
-                            "regime": position_to_close.regime
+                            # REQUIRED FIELDS FOR COMPETITION COMPLIANCE
+                            "model": "ChronosX-Ensemble",
+                            "input": f"Regime: {position_to_close.regime}, PnL: {pnl:.4f}",
+                            "output": f"Close {position_to_close.side}",
+                            "explanation": exit_reason,
+                            "stage": "production",
                         }
                         self.execution_client.upload_ai_log(ai_log)
                     except Exception as e:
