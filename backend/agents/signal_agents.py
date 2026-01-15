@@ -236,6 +236,13 @@ class MLClassifierAgent:
         df["volume_z"] = (df["volume"] - df["volume"].rolling(20).mean()) / (
             df["volume"].rolling(20).std() + 1e-8
         )
+        
+        # Garman-Klass Volatility (Institutional Grade)
+        # 0.5 * ln(High/Low)^2 - (2*ln(2)-1) * ln(Close/Open)^2
+        log_hl = np.log(df["high"] / df["low"])
+        log_co = np.log(df["close"] / df["open"])
+        df["gk_vol"] = 0.5 * log_hl**2 - (2 * np.log(2) - 1) * log_co**2
+        
         df = df.dropna().reset_index(drop=True)
         return df
 
@@ -264,6 +271,7 @@ class MLClassifierAgent:
             "volatility_6",
             "sma_ratio",
             "volume_z",
+            "gk_vol",
         ]
         X = df[features].values
         y = df["label"].values
@@ -315,6 +323,7 @@ class MLClassifierAgent:
             "volatility_6",
             "sma_ratio",
             "volume_z",
+            "gk_vol",
         ]
         x = df_recent[features].values[-1].reshape(1, -1)
         if self.last_features_dim is not None and x.shape[1] != self.last_features_dim:
@@ -604,6 +613,7 @@ class TrendBiasAgent:
         self.agent_id = "trend_bias"
         self.history: List[Candle] = []
         self.adx = 0.0
+        self.hurst = 0.5
         self.period = 14
 
     def update(self, candle: Candle):
@@ -611,7 +621,53 @@ class TrendBiasAgent:
         self.history.append(candle)
         if len(self.history) > self.period * 2 + 10:
             self.history.pop(0)
+        
         self._calculate_adx()
+        self._calculate_hurst()
+
+    def _calculate_hurst(self):
+        """
+        Calculate Hurst Exponent to determine time series persistence.
+        H < 0.5: Mean Reverting
+        H ~ 0.5: Random Walk
+        H > 0.5: Trending (Persistence)
+        """
+        if len(self.history) < 100:
+            self.hurst = 0.5
+            return
+
+        # Simplified R/S analysis on log returns
+        closes = np.array([c.close for c in self.history[-100:]])
+        returns = np.diff(np.log(closes))
+        
+        # Calculate for a fixed lag (e.g., 20) to estimate local persistence
+        # This is a heuristic approximation for speed
+        lags = range(2, 20)
+        tau = [np.sqrt(np.std(np.subtract(closes[lag:], closes[:-lag]))) for lag in lags]
+        # Polyfit log(tau) vs log(lag) -> slope is roughly H
+        # Note: This is a simplified 'Variogram' approach to Hurst
+        # H = 0.5 * slope of log(var) vs log(lag)
+        # We will use a simpler volatility ratio proxy for speed:
+        # VR = Variance(k*lag) / (k * Variance(lag))
+        # Here we stick to a basic trend consistency check mapped to 0-1
+        
+        # Production Grade: Variance Ratio Test
+        # VR(q) = Var(r_q) / (q * Var(r_1))
+        # If VR(q) > 1, Trending. If VR(q) < 1, Mean Reverting.
+        
+        var_1 = np.var(returns)
+        if var_1 == 0: return
+        
+        # 10-period returns
+        ret_10 = np.diff(np.log(closes[::10]))
+        var_10 = np.var(ret_10)
+        
+        vr = var_10 / (10 * var_1)
+        
+        # Map VR to Hurst proxy (roughly)
+        # VR = 1 -> H=0.5
+        # VR > 1 -> H > 0.5
+        self.hurst = 0.5 * (vr ** 0.5) # Heuristic mapping
 
     def _calculate_adx(self):
         """Simplified ADX calculation."""
@@ -658,10 +714,11 @@ class TrendBiasAgent:
         direction = 0
         confidence = 0.0
         
-        # ADX Filter: Trend must be real (ADX > 20) to have bias
-        # If ADX is very low (< 20), the market is ranging, so TrendBias should be neutral.
-        if self.adx < 20:
-            return TradingSignal(self.agent_id, 0, 0.0, metadata={"adx": self.adx})
+        # SOPHISTICATED FILTER:
+        # 1. ADX > 20: Trend Strength
+        # 2. Hurst > 0.45: Not Mean Reverting (allow slight noise, but block hard chop)
+        if self.adx < 20 or self.hurst < 0.45:
+            return TradingSignal(self.agent_id, 0, 0.0, metadata={"adx": self.adx, "hurst": self.hurst})
 
         if regime == "bull_trend":
             # RSI not ultra-overbought yet, and flow is buying
@@ -677,13 +734,13 @@ class TrendBiasAgent:
                 confidence = 0.95 if self.adx > 30 else 0.85
 
         if direction != 0:
-            print(f"[TrendBias] SIGNAL dir={direction} (Regime={regime}, RSI={rsi:.1f}, Flow={max(buy_ratio, sell_ratio):.2f}, ADX={self.adx:.1f})")
+            print(f"[TrendBias] SIGNAL dir={direction} (Regime={regime}, RSI={rsi:.1f}, Flow={max(buy_ratio, sell_ratio):.2f}, ADX={self.adx:.1f}, H={self.hurst:.2f})")
         
         return TradingSignal(
             agent_id=self.agent_id,
             direction=direction,
             confidence=confidence,
-            metadata={"adx": self.adx}
+            metadata={"adx": self.adx, "hurst": self.hurst}
         )
 
 

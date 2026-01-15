@@ -17,6 +17,7 @@ import pandas as pd
 
 from backend.trading.paper_trader import PaperTrader
 from backend.config import TradingConfig
+from backend.agents.signal_agents import Candle
 
 
 @dataclass
@@ -62,12 +63,31 @@ class Backtester:
         # Use the actual PaperTrader to ensure backtest matches live logic
         trader = PaperTrader(config=backtest_config) # PaperTrader no longer takes 'symbol' directly
 
+        # FIX: Unlock the trader for backtesting (bypass exchange reconciliation)
+        trader.reconciliation_stable = True
+
         # Run the simulation asynchronously
         loop = asyncio.get_event_loop()
-        for _, row in df.iterrows():
+        
+        # SPLIT DATA: Prime with first 300 candles, trade on the rest
+        prime_count = 350
+        if len(df) > prime_count:
+            prime_df = df.iloc[:prime_count]
+            run_df = df.iloc[prime_count:]
+            
+            # Convert prime data to Candle objects
+            prime_candles = [Candle.from_row(row) for _, row in prime_df.iterrows()]
+            for c in prime_candles:
+                c.symbol = self.symbol
+            # Prime the agents (trains ML, warms up indicators)
+            loop.run_until_complete(trader.prime_agents(self.symbol, prime_candles))
+        else:
+            run_df = df
+
+        for _, row in run_df.iterrows():
             # Convert row to Candle object
-            from backend.agents.signal_agents import Candle
             candle = Candle.from_row(row)
+            candle.symbol = self.symbol
             # Process each candle using the exact same logic as the live trader
             loop.run_until_complete(trader.process_candle(candle))
             

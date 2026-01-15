@@ -35,7 +35,7 @@ class TradingConfig:
     MAX_SLIPPAGE = 0.003  # 0.3%
     MAX_EXECUTION_LATENCY_MS = 1500  # 1.5 seconds
     MIN_VOLUME_RATIO = 0.01  # Order must be <1% of recent volume
-    MAX_RISK_PER_TRADE = 0.015 # Reduced to 1.5% standard risk
+    MAX_RISK_PER_TRADE = 0.010 # Reduced to 1.0% to survive drawdowns
 
     # ============================================================================
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE

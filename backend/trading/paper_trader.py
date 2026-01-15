@@ -299,14 +299,22 @@ class PaperTrader:
         # --- Time-based triggers (always active) ---
         hold_time_minutes = (candle.timestamp - position.timestamp).total_seconds() / 60
         
+        # Check Trend Strength for Exit Override
+        trend_agent = self._get_agents(candle.symbol).get("trend_bias")
+        is_super_trend = trend_agent and hasattr(trend_agent, "adx") and trend_agent.adx > 40
+
         # Exit Trigger 6: Stale Profit (Time Decay) - Disabled in competition mode to let winners run
         if not self.config.COMPETITION_MODE and hold_time_minutes > (self.config.MAX_HOLD_TIME_MINUTES * 0.5) and pnl_pct > 0.002:
+                if is_super_trend:
+                    return False, None # Ignore stale profit in super trend
                 return True, f"Stale profit exit: {pnl_pct:.2%} after {int(hold_time_minutes)}m"
 
         # Exit Trigger 3: Max Hold Time (from config)
         # STRATEGY UPDATE: Only enforce time limit if trade is stagnant.
         # If we are riding a winner (> 1% profit), ignore the clock and let the trailing stop work.
         if hold_time_minutes > self.config.MAX_HOLD_TIME_MINUTES:
+            if is_super_trend:
+                return False, None # Ignore time limit in super trend
             if pnl_pct < 0.01:
                 return True, f"Max hold time exceeded with low profit: {int(hold_time_minutes)}m, PnL {pnl_pct:.2%}"
             # Else: Implicitly allow holding longer
@@ -635,6 +643,7 @@ class PaperTrader:
         
         # Block new entries until reconciliation has run successfully
         if not self.reconciliation_stable:
+            # print(f"[PaperTrader] Entry blocked: Reconciliation not stable.") # Uncomment for verbose debug
             return
 
         # Allow entry if no position OR if pyramiding is active and we want to add to the same-direction position
@@ -665,6 +674,15 @@ class PaperTrader:
 
             if ensemble_decision.confidence < self.config.MIN_CONFIDENCE:
                 print(f"[PaperTrader] Confidence {ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE} -> no trade")
+            # --- SOPHISTICATED: Smart Recovery (Dynamic Confidence) ---
+            # If we are down for the day, require higher confidence to enter new trades.
+            # "Play tight when you're losing."
+            dynamic_min_conf = self.config.MIN_CONFIDENCE
+            if self.daily_pnl < 0:
+                dynamic_min_conf += 0.05 # Raise bar by 5%
+
+            if ensemble_decision.confidence < dynamic_min_conf:
+                print(f"[PaperTrader] Confidence {ensemble_decision.confidence:.2f} < {dynamic_min_conf:.2f} (Dynamic) -> no trade")
                 return
             
             # RR-AWARE ENTRY VETO
