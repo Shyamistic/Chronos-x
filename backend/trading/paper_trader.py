@@ -350,6 +350,10 @@ class PaperTrader:
                 except Exception as e:
                     print(f"[PaperTrader] ML Agent training failed during priming: {e}")
 
+        # NEW: Detect initial regime so reconciliation knows the state
+        if candles:
+            self._detect_regime(candles[-1], agents)
+
     async def run_live_simulation(self, candle_stream, hours: int = 24):
         """Simulate N hours of trading on a candle async generator."""
         async for candle in candle_stream:
@@ -980,6 +984,49 @@ class PaperTrader:
 
             entry_price = float(pos.get("averageOpenPrice", 0) or pos.get("openPrice", 0))
             
+            # --- NEW: Legacy/Misaligned Position Cleanup ---
+            agents = self._get_agents(symbol)
+            current_regime = agents.get("current_regime", MarketRegime.UNKNOWN)
+            
+            if self.config.COMPETITION_MODE and current_regime in (MarketRegime.BULL_TREND, MarketRegime.BEAR_TREND):
+                is_misaligned = False
+                if current_regime == MarketRegime.BULL_TREND and side == "sell":
+                    is_misaligned = True
+                elif current_regime == MarketRegime.BEAR_TREND and side == "buy":
+                    is_misaligned = True
+                
+                if is_misaligned:
+                    print(f"[PaperTrader] RECONCILIATION: Found misaligned {side} position for {symbol} in {current_regime.value}. Auto-closing legacy position.")
+                    if self.execution_client:
+                        try:
+                            # 3=Close Long, 4=Close Short
+                            close_type = "3" if side == "buy" else "4"
+                            self.execution_client.place_order(
+                                symbol=symbol,
+                                size=f"{size:.{get_precision(symbol)}f}",
+                                type_=close_type,
+                                price="0",
+                                match_price="1"
+                            )
+                            # Log compliance
+                            if hasattr(self.execution_client, 'upload_ai_log'):
+                                self.execution_client.upload_ai_log({
+                                    "symbol": symbol,
+                                    "side": close_type,
+                                    "size": str(size),
+                                    "price": str(entry_price),
+                                    "timestamp": int(datetime.now().timestamp() * 1000),
+                                    "model": "ChronosX-Governance",
+                                    "input": f"Regime: {current_regime.value}",
+                                    "output": "Close Legacy",
+                                    "explanation": "Startup cleanup of misaligned legacy position",
+                                    "stage": "production"
+                                })
+                        except Exception as e:
+                            print(f"[PaperTrader] Failed to auto-close legacy position: {e}")
+                    continue # Do not adopt this position
+            # -----------------------------------------------
+
             if symbol in self.open_positions:
                 existing = self.open_positions[symbol]
                 print(f"[PaperTrader] CRITICAL WARNING: HEDGED STATE DETECTED for {symbol}. Found {side} while holding {existing.side}.")
