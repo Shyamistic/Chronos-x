@@ -22,6 +22,7 @@ from backend.agents.signal_agents import (
     MLClassifierAgent,
     OrderFlowAgent,
     SentimentAgent,
+    TrendBiasAgent,
     EnsembleAgent,
 )
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
@@ -74,6 +75,8 @@ class TradeRecord:
     order_id: Optional[str] = None
     highest_pnl_pct: float = 0.0
     exit_reason: str = "unknown"
+    add_count: int = 0
+    partial_taken: bool = False
 
     def __post_init__(self):
         if self.contributing_agents is None:
@@ -162,6 +165,7 @@ class PaperTrader:
                 "ml": MLClassifierAgent(),
                 "order_flow": OrderFlowAgent(),
                 "sentiment": SentimentAgent(),
+                "trend_bias": TrendBiasAgent(),
                 "ensemble": EnsembleAgent(),
                 "portfolio": ThompsonSamplingPortfolioManager(
                     agent_ids=["momentum_rsi", "ml_classifier", "order_flow", "sentiment"]
@@ -457,6 +461,15 @@ class PaperTrader:
         sig_sentiment = agents["sentiment"].generate()
         if sig_sentiment: signals.append(sig_sentiment)
 
+        # Trend Bias (Fusion)
+        rsi_val = sig_momentum.metadata.get("rsi", 50.0) if sig_momentum else 50.0
+        buy_ratio = sig_orderflow.metadata.get("buy_ratio", 0.5) if sig_orderflow else 0.5
+        sell_ratio = sig_orderflow.metadata.get("sell_ratio", 0.5) if sig_orderflow else 0.5
+        
+        sig_trend = agents["trend_bias"].generate(regime.value, rsi_val, buy_ratio, sell_ratio)
+        if sig_trend.direction != 0:
+            signals.append(sig_trend)
+
         # ML Agent signal generation (from Fix #3)
         sig_ml = agents["ml"].generate()
         if sig_ml: signals.append(sig_ml)
@@ -494,14 +507,26 @@ class PaperTrader:
                 
                 # If we have a strong signal, use it
                 if strongest_signal.confidence >= 0.6: # Increased from 0.5 to filter noise
-                    print(f"[PaperTrader] COMPETITION: Ensemble {'flat' if is_flat else 'weak'} (conf={ensemble_decision.confidence:.2f}), overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
-                    from backend.agents.signal_agents import TradingDecision
-                    # Create a new ensemble decision based on this single agent
-                    ensemble_decision = TradingDecision(
-                        direction=strongest_signal.direction,
-                        confidence=strongest_signal.confidence,
-                        agent_signals=[strongest_signal] # Log that this was an override
-                    )
+                    # NEW: Enforce Regime Alignment for Overrides
+                    regime_dir = 0
+                    if regime == MarketRegime.BULL_TREND: regime_dir = 1
+                    elif regime == MarketRegime.BEAR_TREND: regime_dir = -1
+                    
+                    # Only allow override if it aligns with trend or if we are in chop (and taking a scalp)
+                    # For Swing Strategy: Strictly enforce trend alignment for overrides in trend regimes
+                    is_aligned = (regime_dir == 0) or (strongest_signal.direction == regime_dir)
+                    
+                    if is_aligned:
+                        print(f"[PaperTrader] COMPETITION: Ensemble {'flat' if is_flat else 'weak'} (conf={ensemble_decision.confidence:.2f}), overriding with strongest agent '{strongest_signal.agent_id}' (conf: {strongest_signal.confidence:.2f}).")
+                        from backend.agents.signal_agents import TradingDecision
+                        # Create a new ensemble decision based on this single agent
+                        ensemble_decision = TradingDecision(
+                            direction=strongest_signal.direction,
+                            confidence=strongest_signal.confidence,
+                            agent_signals=[strongest_signal] # Log that this was an override
+                        )
+                    else:
+                        print(f"[PaperTrader] COMPETITION: Strongest signal '{strongest_signal.agent_id}' ({strongest_signal.direction}) opposes regime {regime.value}. Ignoring override.")
 
         # Cache for external consumers (WeexTradingLoop)
         self.last_ensemble_decision = ensemble_decision
@@ -529,6 +554,11 @@ class PaperTrader:
                 hold_time_minutes = (candle.timestamp - current_position.timestamp).total_seconds() / 60
                 pnl_pct = ((candle.close - current_position.entry_price) / current_position.entry_price) * (1 if is_long else -1)
 
+                # NOISE FILTER: If trade hasn't hit stop or target, ignore flip unless confidence is extreme
+                if -0.01 < pnl_pct < 0.015 and ensemble_decision.confidence < 0.85:
+                     print(f"[PaperTrader] NOISE FLIP IGNORED: PnL {pnl_pct:.2%} within noise band. Holding {current_position.side}.")
+                     return
+
                 # Base flip threshold
                 flip_threshold = self.config.MIN_CONFIDENCE + 0.2
                 if regime.value == 'chop':
@@ -545,19 +575,28 @@ class PaperTrader:
                 self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason="signal_flip")
                 current_position = None # Position is now closed
             
-            # Pyramiding (Competition Mode): Add to winner if confidence is high
-            # Gated by reconciliation status to prevent state-blind pyramiding
-            elif self.config.COMPETITION_MODE and self.reconciliation_stable and ensemble_decision.confidence > 0.5:
-                # Only pyramid if we are in profit and in the same direction
-                # STEP 3: MANDATORY PYRAMIDING ON WINNERS
-                is_strong_regime = regime.value in ("bull_trend", "bear_trend")
-                if current_position.highest_pnl_pct > 0.003 and is_strong_regime and ((is_long and new_direction == 1) or (not is_long and new_direction == -1)): # > 0.3% profit
-                    is_pyramiding = True
+            # Add-on Logic (Pyramiding on Dips)
+            elif self.config.COMPETITION_MODE and self.reconciliation_stable:
+                # Check for "Add on Dips" condition
+                # 1. Strong Regime
+                # 2. Same direction signal
+                # 3. Price dipped 0.4-0.6% from entry (averaging in on trend pullback) OR breakout
+                # 4. Max 1 add-on
+                if current_position.add_count < 1 and regime.value in ("bull_trend", "bear_trend"):
+                    dip_threshold = 0.004 # 0.4% dip
+                    if is_long and new_direction == 1 and candle.close < current_position.entry_price * (1 - dip_threshold):
+                         is_pyramiding = True
+                    elif not is_long and new_direction == -1 and candle.close > current_position.entry_price * (1 + dip_threshold):
+                         is_pyramiding = True
 
         # 2. Handle Exits (SL, TP, etc.) if a position is still open.
         # Re-check self.open_positions as it might have been closed by the flip logic.
         if candle.symbol in self.open_positions:
             position_to_check = self.open_positions[candle.symbol]
+            
+            # Check Partial Take Profit
+            self._check_partial_exit(position_to_check, candle)
+            
             should_exit, exit_reason = self._should_exit(position_to_check, candle, ensemble_decision)
             if should_exit:
                 print(f"[PaperTrader] EXIT TRIGGERED: {exit_reason}")
@@ -608,11 +647,6 @@ class PaperTrader:
                 print(f"[PaperTrader] CHOP REGIME: Blocking entry due to insufficient confidence ({ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE + 0.1:.2f})")
                 return
             
-            # Stricter entry in CHOP regime to prevent fee burn
-            if regime.value == 'chop' and ensemble_decision.confidence < (self.config.MIN_CONFIDENCE + 0.1):
-                print(f"[PaperTrader] CHOP REGIME: Blocking entry due to insufficient confidence ({ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE + 0.1:.2f})")
-                return
-            
             # Regime-based trading restriction (Concentrate Risk)
             if self.config.COMPETITION_MODE and not self.config.TRADE_IN_CHOPPY_REGIME and regime.value == 'chop':
                 print("[PaperTrader] COMPETITION MODE: Blocking new entry in CHOP regime.")
@@ -635,22 +669,24 @@ class PaperTrader:
             
             # --- HIGH-CONVICTION SIZING LOGIC ---
             # Determine sizing mode based on regime, confidence, and session safety
-            is_high_confidence = (
-                regime.value in ("bull_trend", "bear_trend") and 
-                ensemble_decision.confidence >= 0.75 and
-                not is_defensive # Session safety: downgrade size if on losing streak
-            )
+            # Boosted Size: Strong Trend + Signal Agreement (TrendBias active) + High Confidence
+            is_boosted = False
+            if regime.value in ("bull_trend", "bear_trend") and not is_defensive:
+                # Check if TrendBias signal aligns
+                if sig_trend.direction == new_direction and ensemble_decision.confidence >= 0.75:
+                     # Check expected move
+                     if expected_move_pct >= 0.006: # > 0.6% expected move
+                         is_boosted = True
             
             leverage = 20.0
-            if is_high_confidence:
-                # Target $50-100 profit on 0.5-1% move -> $10k notional -> $500 margin
-                # Use 40% of equity as margin (approx $400 on $1000 account)
+            if is_boosted:
+                # Boosted: 0.4x Equity Notional
                 target_margin_pct = 0.40 
-                print(f"[PaperTrader] SIZING: High confidence trend setup. Using {target_margin_pct:.0%} equity.")
+                print(f"[PaperTrader] SIZING: BOOSTED Trend Setup. Using {target_margin_pct:.0%} equity.")
             else:
-                # Conservative sizing for chop/weak signals or recovery mode
-                target_margin_pct = 0.10
-                print(f"[PaperTrader] SIZING: Standard/Conservative setup. Using {target_margin_pct:.0%} equity.")
+                # Base: 0.15x Equity Notional
+                target_margin_pct = 0.15
+                print(f"[PaperTrader] SIZING: Base Trend Setup. Using {target_margin_pct:.0%} equity.")
 
             target_margin_usdt = self.equity * target_margin_pct
             scaled_size_usdt = target_margin_usdt * leverage
@@ -670,8 +706,8 @@ class PaperTrader:
             # For pyramiding, we are adding to an existing position.
             # The size should be an *additional* amount, not the total.
             if is_pyramiding:
-                # Add half of the calculated 'explosion' size for pyramid
-                scaled_size_usdt *= 0.5
+                # Add 50-70% of base size
+                scaled_size_usdt = (self.equity * 0.15 * leverage) * 0.6
                 
             size = scaled_size_usdt / candle.close
             
@@ -814,6 +850,7 @@ class PaperTrader:
             pos.entry_price = avg_price
             # Reset PnL tracking for new avg price? Or keep relative? 
             # Keeping simple: update entry price, PnL will recalculate next tick.
+            pos.add_count += 1
             return True
 
         new_position = TradeRecord(
@@ -943,6 +980,56 @@ class PaperTrader:
             f"[PaperTrader] Closed position side={trade.side}, size={trade.size:.6f}, "
             f"entry={trade.entry_price}, exit={exit_price}, pnl={pnl:.4f}, total_pnl={self.total_pnl:.4f}, reason='{exit_reason}'"
         )
+
+    def _check_partial_exit(self, position: TradeRecord, candle: Candle):
+        """Check and execute partial take profit."""
+        if position.partial_taken:
+            return
+
+        current_price = candle.close
+        direction = 1 if position.side == "buy" else -1
+        pnl_pct = ((current_price - position.entry_price) / position.entry_price) * direction
+
+        # Target: +1.5% to +2.0% PnL
+        if pnl_pct >= 0.015:
+            print(f"[PaperTrader] PARTIAL TP: PnL {pnl_pct:.2%} hit target. Closing 50%.")
+            
+            close_size = position.size * 0.5
+            final_size = normalize_size(position.symbol, close_size)
+            
+            if final_size > 0:
+                self._execute_partial_close(position, final_size, current_price, "partial_tp")
+                position.partial_taken = True
+                # Move stop to breakeven logic is handled by ATR_BREAKEVEN_ACTIVATION_MULTIPLIER
+
+    def _execute_partial_close(self, position: TradeRecord, size: float, price: float, reason: str):
+        """Execute a partial close without removing the position record."""
+        if self.execution_client:
+            try:
+                close_type = "3" if position.side == "buy" else "4"
+                response = self.execution_client.place_order(
+                    symbol=position.symbol,
+                    size=f"{size:.{get_precision(position.symbol)}f}",
+                    type_=close_type,
+                    price="0",
+                    match_price="1"
+                )
+                print(f"[PaperTrader] PARTIAL EXECUTION SUCCESS: {response}")
+                
+                # Update internal state
+                position.size -= size
+                
+                # Log PnL for the closed portion
+                direction = 1 if position.side == "buy" else -1
+                pnl = ((price - position.entry_price) * direction * size)
+                self.balance += pnl
+                self.total_pnl += pnl
+                self.daily_pnl += pnl
+                self.recent_pnls.append(pnl)
+                
+            except Exception as e:
+                print(f"[PaperTrader] PARTIAL EXECUTION FAILED: {e}")
+
 
     def reconcile_positions_from_response(self, resp: Dict[str, Any]):
         """Parse WEEX API response and reconcile positions."""

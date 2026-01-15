@@ -510,6 +510,46 @@ class SentimentAgent:
 
 
 # ============================================================
+# Trend Bias Agent (Regime + RSI + OrderFlow Fusion)
+# ============================================================
+
+class TrendBiasAgent:
+    """
+    Enforces trend alignment rules.
+    
+    Bull Rules: Bull Regime + RSI 45-68 + Buy Ratio > 0.6
+    Bear Rules: Bear Regime + RSI 32-55 + Sell Ratio > 0.6
+    """
+    def __init__(self):
+        self.agent_id = "trend_bias"
+
+    def generate(self, regime: str, rsi: float, buy_ratio: float, sell_ratio: float) -> TradingSignal:
+        direction = 0
+        confidence = 0.0
+
+        if regime == "bull_trend":
+            # RSI not ultra-overbought yet, and flow is buying
+            if 45 <= rsi <= 68 and buy_ratio > 0.6:
+                direction = 1
+                confidence = 0.9  # High conviction
+        
+        elif regime == "bear_trend":
+            # RSI not ultra-oversold yet, and flow is selling
+            if 32 <= rsi <= 55 and sell_ratio > 0.6:
+                direction = -1
+                confidence = 0.9
+
+        if direction != 0:
+            print(f"[TrendBias] SIGNAL dir={direction} (Regime={regime}, RSI={rsi:.1f}, Flow={max(buy_ratio, sell_ratio):.2f})")
+        
+        return TradingSignal(
+            agent_id=self.agent_id,
+            direction=direction,
+            confidence=confidence
+        )
+
+
+# ============================================================
 # Ensemble Agent (soft voting, regime-aware)
 # ============================================================
 
@@ -535,6 +575,7 @@ class EnsembleAgent:
             "ml_classifier": 1.0,
             "order_flow": 1.0,
             "sentiment": 1.0,
+            "trend_bias": 2.0, # Higher weight for trend confirmation
         }
         self.current_regime: Optional[str] = None
 
