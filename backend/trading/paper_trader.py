@@ -110,8 +110,8 @@ class PaperTrader:
             self.config.MAX_RISK_PER_TRADE = 0.015
             # 5. Activate breakeven at 1.2x ATR to lock in fees before trailing starts
             self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.2
-            # 5. Ensure breakeven exit covers fees (0.25% buffer)
-            self.config.BREAKEVEN_PROFIT_PCT = 0.0025
+            # 6. Ensure breakeven exit covers fees (0.40% buffer)
+            self.config.BREAKEVEN_PROFIT_PCT = 0.0040
             
         # Fee Configuration (WEEX Taker ~0.06%)
         self.taker_fee_pct = 0.0006 
@@ -295,8 +295,13 @@ class PaperTrader:
                 return True, f"Stale profit exit: {pnl_pct:.2%} after {int(hold_time_minutes)}m"
 
         # Exit Trigger 3: Max Hold Time (from config)
+        # STRATEGY UPDATE: Only enforce time limit if trade is stagnant.
+        # If we are riding a winner (> 1% profit), ignore the clock and let the trailing stop work.
         if hold_time_minutes > self.config.MAX_HOLD_TIME_MINUTES:
-            return True, f"Max hold time exceeded: {int(hold_time_minutes)}m"
+            if pnl_pct < 0.01:
+                return True, f"Max hold time exceeded with low profit: {int(hold_time_minutes)}m, PnL {pnl_pct:.2%}"
+            # Else: Implicitly allow holding longer
+            pass
 
         return False, None
 
@@ -463,7 +468,8 @@ class PaperTrader:
         if sig_orderflow: signals.append(sig_orderflow)
 
         sig_sentiment = agents["sentiment"].generate()
-        if sig_sentiment: signals.append(sig_sentiment)
+        # DISABLED: sentiment in recovery mode – it reacts to 1m noise
+        # if sig_sentiment: signals.append(sig_sentiment)
 
         # Trend Bias (Fusion)
         rsi_val = sig_momentum.metadata.get("rsi", 50.0) if sig_momentum else 50.0
@@ -479,7 +485,8 @@ class PaperTrader:
         if sig_ml: signals.append(sig_ml)
 
         # Fallback signal
-        if not any(s.direction != 0 for s in signals):
+        # Fallback trend signal DISABLED for recovery mode – only trade when real agents agree
+        if False and not any(s.direction != 0 for s in signals):
             if len(agents["momentum"].history) >= 20:
                 closes = [c.close for c in agents["momentum"].history[-20:]]
                 sma20 = sum(closes) / len(closes)
@@ -501,7 +508,8 @@ class PaperTrader:
         ensemble_decision = agents["ensemble"].combine(signals)
 
         # COMPETITION OVERRIDE: If ensemble is flat OR weak, let the strongest single agent take over
-        if self.config.COMPETITION_MODE and signals:
+        # DISABLED: overriding ensemble with single noiser agent causes over-trading
+        if False and self.config.COMPETITION_MODE and signals:
             is_flat = ensemble_decision.direction == 0
             is_weak = ensemble_decision.confidence < self.config.MIN_CONFIDENCE
             
@@ -580,7 +588,8 @@ class PaperTrader:
                 current_position = None # Position is now closed
             
             # Add-on Logic (Pyramiding on Dips)
-            elif self.config.COMPETITION_MODE and self.reconciliation_stable:
+            # Pyramiding DISABLED in recovery mode – one slot per symbol only
+            elif False and self.config.COMPETITION_MODE and self.reconciliation_stable:
                 # Check for "Add on Dips" condition
                 # 1. Strong Regime
                 # 2. Same direction signal
@@ -608,6 +617,11 @@ class PaperTrader:
                 return # Stop processing for this candle after a SL/TP exit.
 
         # 3. Handle Entries
+        
+        # Block new entries until reconciliation has run successfully
+        if not self.reconciliation_stable:
+            return
+
         # Allow entry if no position OR if pyramiding is active and we want to add to the same-direction position
         allow_entry = False
         if candle.symbol not in self.open_positions:
@@ -994,11 +1008,11 @@ class PaperTrader:
         direction = 1 if position.side == "buy" else -1
         pnl_pct = ((current_price - position.entry_price) / position.entry_price) * direction
 
-        # Target: +1.5% to +2.0% PnL
-        if pnl_pct >= 0.015:
-            print(f"[PaperTrader] PARTIAL TP: PnL {pnl_pct:.2%} hit target. Closing 50%.")
+        # Target: Configurable Partial TP (default 1.5%)
+        if pnl_pct >= self.config.PARTIAL_TP_PCT:
+            print(f"[PaperTrader] PARTIAL TP: PnL {pnl_pct:.2%} hit target. Closing {self.config.PARTIAL_TP_SIZE:.0%}.")
             
-            close_size = position.size * 0.5
+            close_size = position.size * self.config.PARTIAL_TP_SIZE
             final_size = normalize_size(position.symbol, close_size)
             
             if final_size > 0:
