@@ -510,6 +510,86 @@ class SentimentAgent:
 
 
 # ============================================================
+# LLM Analysis Agent (Macro/Reasoning)
+# ============================================================
+
+class LLMAnalysisAgent:
+    """
+    Asynchronous agent that provides high-level market reasoning.
+    
+    Designed to run on a slower heartbeat (e.g. every 5-15 mins) to avoid
+    API latency blocking the main loop.
+    
+    Current Logic (Heuristic Proxy for LLM):
+    - Analyzes Market Structure (Higher Highs/Lower Lows) over 60 candles.
+    - Detects Volatility Compression (pre-breakout state).
+    
+    TODO: Connect to OpenAI/Anthropic API in `_query_llm` for news sentiment.
+    """
+    def __init__(self, update_interval_seconds: int = 300):
+        self.agent_id = "llm_analysis"
+        self.update_interval = update_interval_seconds
+        self.last_update_ts = 0
+        self.cached_signal: Optional[TradingSignal] = None
+        self.history: List[Candle] = []
+        
+    def update(self, candle: Candle):
+        self.history.append(candle)
+        if len(self.history) > 120: # Keep 2 hours of 1m history
+            self.history.pop(0)
+            
+    def generate(self, recent_trades: List[Any] = None) -> Optional[TradingSignal]:
+        import time
+        now = time.time()
+        
+        # Return cached signal if within interval (simulate async/slow thinking)
+        if self.cached_signal and (now - self.last_update_ts < self.update_interval):
+            return self.cached_signal
+            
+        if len(self.history) < 60:
+            return None
+            
+        # --- Logic that mimics LLM "Market Structure" reasoning ---
+        closes = np.array([c.close for c in self.history])
+        highs = np.array([c.high for c in self.history])
+        lows = np.array([c.low for c in self.history])
+        
+        # 1. Identify Structure (Last 60 mins)
+        # Simple pivot detection
+        recent_high = np.max(highs[-20:])
+        prev_high = np.max(highs[-60:-20])
+        recent_low = np.min(lows[-20:])
+        prev_low = np.min(lows[-60:-20])
+        
+        direction = 0
+        reason = "Indeterminate"
+        
+        if recent_high > prev_high and recent_low > prev_low:
+            direction = 1
+            reason = "Bullish Market Structure (HH/HL)"
+        elif recent_high < prev_high and recent_low < prev_low:
+            direction = -1
+            reason = "Bearish Market Structure (LH/LL)"
+            
+        # 2. Volatility Compression (Squeeze)
+        std_recent = np.std(closes[-20:])
+        std_prev = np.std(closes[-60:-20])
+        if std_recent < std_prev * 0.5:
+            # Volatility squeeze - LLM would suggest "Prepare for breakout"
+            # We don't set direction, but we boost confidence if direction exists
+            reason += " + Volatility Squeeze"
+            
+        confidence = 0.85 if direction != 0 else 0.0
+        
+        self.last_update_ts = now
+        self.cached_signal = TradingSignal(self.agent_id, direction, confidence, metadata={"reason": reason})
+        
+        if direction != 0:
+            print(f"[LLMAnalysis] REFRESHED SIGNAL: {reason} (Dir: {direction})")
+            
+        return self.cached_signal
+
+# ============================================================
 # Trend Bias Agent (Regime + RSI + OrderFlow Fusion)
 # ============================================================
 
@@ -522,30 +602,88 @@ class TrendBiasAgent:
     """
     def __init__(self):
         self.agent_id = "trend_bias"
+        self.history: List[Candle] = []
+        self.adx = 0.0
+        self.period = 14
+
+    def update(self, candle: Candle):
+        """Update history and calculate ADX."""
+        self.history.append(candle)
+        if len(self.history) > self.period * 2 + 10:
+            self.history.pop(0)
+        self._calculate_adx()
+
+    def _calculate_adx(self):
+        """Simplified ADX calculation."""
+        if len(self.history) < self.period + 1:
+            return
+
+        # Calculate True Range and Directional Movement for the last candle
+        curr = self.history[-1]
+        prev = self.history[-2]
+
+        tr = max(curr.high - curr.low, abs(curr.high - prev.close), abs(curr.low - prev.close))
+        dm_plus = curr.high - prev.high if (curr.high - prev.high) > (prev.low - curr.low) and (curr.high - prev.high) > 0 else 0
+        dm_minus = prev.low - curr.low if (prev.low - curr.low) > (curr.high - prev.high) and (prev.low - curr.low) > 0 else 0
+
+        # Simple exponential smoothing (approximate Wilder's)
+        alpha = 1.0 / self.period
+        
+        # Note: A full production ADX requires full history smoothing. 
+        # This is a reactive approximation sufficient for live streaming.
+        # For the very first value, we'd need an average, but here we just smooth continuously.
+        if not hasattr(self, '_smooth_tr'):
+            self._smooth_tr = tr
+            self._smooth_dm_plus = dm_plus
+            self._smooth_dm_minus = dm_minus
+        else:
+            self._smooth_tr = (1 - alpha) * self._smooth_tr + alpha * tr
+            self._smooth_dm_plus = (1 - alpha) * self._smooth_dm_plus + alpha * dm_plus
+            self._smooth_dm_minus = (1 - alpha) * self._smooth_dm_minus + alpha * dm_minus
+
+        di_plus = 100 * (self._smooth_dm_plus / self._smooth_tr) if self._smooth_tr > 0 else 0
+        di_minus = 100 * (self._smooth_dm_minus / self._smooth_tr) if self._smooth_tr > 0 else 0
+        
+        dx = 100 * abs(di_plus - di_minus) / (di_plus + di_minus) if (di_plus + di_minus) > 0 else 0
+        
+        # Smooth DX to get ADX
+        if not hasattr(self, '_adx_val'):
+            self._adx_val = dx
+        else:
+            self._adx_val = (1 - alpha) * self._adx_val + alpha * dx
+        
+        self.adx = self._adx_val
 
     def generate(self, regime: str, rsi: float, buy_ratio: float, sell_ratio: float) -> TradingSignal:
         direction = 0
         confidence = 0.0
+        
+        # ADX Filter: Trend must be real (ADX > 20) to have bias
+        # If ADX is very low (< 20), the market is ranging, so TrendBias should be neutral.
+        if self.adx < 20:
+            return TradingSignal(self.agent_id, 0, 0.0, metadata={"adx": self.adx})
 
         if regime == "bull_trend":
             # RSI not ultra-overbought yet, and flow is buying
             if 45 <= rsi <= 68 and buy_ratio > 0.55:
                 direction = 1
-                confidence = 0.9  # High conviction
+                # Boost confidence if ADX is strong
+                confidence = 0.95 if self.adx > 30 else 0.85
         
         elif regime == "bear_trend":
             # RSI not ultra-oversold yet, and flow is selling
             if 32 <= rsi <= 55 and sell_ratio > 0.55:
                 direction = -1
-                confidence = 0.9
+                confidence = 0.95 if self.adx > 30 else 0.85
 
         if direction != 0:
-            print(f"[TrendBias] SIGNAL dir={direction} (Regime={regime}, RSI={rsi:.1f}, Flow={max(buy_ratio, sell_ratio):.2f})")
+            print(f"[TrendBias] SIGNAL dir={direction} (Regime={regime}, RSI={rsi:.1f}, Flow={max(buy_ratio, sell_ratio):.2f}, ADX={self.adx:.1f})")
         
         return TradingSignal(
             agent_id=self.agent_id,
             direction=direction,
-            confidence=confidence
+            confidence=confidence,
+            metadata={"adx": self.adx}
         )
 
 
@@ -576,6 +714,7 @@ class EnsembleAgent:
             "order_flow": 1.0,
             "sentiment": 1.0,
             "trend_bias": 2.0, # Higher weight for trend confirmation
+            "llm_analysis": 2.5, # High weight for macro structure
         }
         self.current_regime: Optional[str] = None
 

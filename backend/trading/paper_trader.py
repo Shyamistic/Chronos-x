@@ -23,6 +23,7 @@ from backend.agents.signal_agents import (
     OrderFlowAgent,
     SentimentAgent,
     TrendBiasAgent,
+    LLMAnalysisAgent,
     EnsembleAgent,
 )
 from backend.agents.portfolio_manager import ThompsonSamplingPortfolioManager
@@ -166,6 +167,7 @@ class PaperTrader:
                 "order_flow": OrderFlowAgent(),
                 "sentiment": SentimentAgent(),
                 "trend_bias": TrendBiasAgent(),
+                "llm": LLMAnalysisAgent(update_interval_seconds=300), # 5 min heartbeat
                 "ensemble": EnsembleAgent(),
                 "portfolio": ThompsonSamplingPortfolioManager(
                     agent_ids=["momentum_rsi", "ml_classifier", "order_flow", "sentiment"]
@@ -246,8 +248,15 @@ class PaperTrader:
             if pnl_pct < -adaptive_stop_loss_pct:
                 return True, f"Adaptive Hardstop loss hit: {pnl_pct:.2%} (ATR: {effective_atr:.4f})"
 
-            # Adaptive Take Profit: e.g., 4x ATR above entry (2:1 R:R)
-            adaptive_take_profit_pct = self.config.ATR_TAKE_PROFIT_MULTIPLIER * atr_pct
+            # --- SOPHISTICATED: Dynamic Take Profit based on Trend Strength (ADX) ---
+            # If ADX > 30 (Strong Trend), expand TP to let winners run further.
+            tp_multiplier = self.config.ATR_TAKE_PROFIT_MULTIPLIER
+            trend_agent = self._get_agents(candle.symbol).get("trend_bias")
+            if trend_agent and hasattr(trend_agent, "adx") and trend_agent.adx > 30:
+                tp_multiplier *= 1.5 # Expand target by 50% (e.g. 5.0 -> 7.5 ATR)
+                # print(f"[PaperTrader] DYNAMIC TP: Strong Trend (ADX {trend_agent.adx:.1f}), expanding target to {tp_multiplier}x ATR")
+
+            adaptive_take_profit_pct = tp_multiplier * atr_pct
             if pnl_pct > adaptive_take_profit_pct:
                 return True, f"Adaptive Take Profit hit: {pnl_pct:.2%} (ATR: {effective_atr:.4f})"
 
@@ -470,8 +479,14 @@ class PaperTrader:
         sig_sentiment = agents["sentiment"].generate()
         # DISABLED: sentiment in recovery mode – it reacts to 1m noise
         # if sig_sentiment: signals.append(sig_sentiment)
+        
+        # LLM / Macro Agent
+        agents["llm"].update(candle)
+        sig_llm = agents["llm"].generate(recent_trades=self.trades[-10:])
+        if sig_llm: signals.append(sig_llm)
 
         # Trend Bias (Fusion)
+        agents["trend_bias"].update(candle) # Update ADX state
         rsi_val = sig_momentum.metadata.get("rsi", 50.0) if sig_momentum else 50.0
         buy_ratio = sig_orderflow.metadata.get("buy_ratio", 0.5) if sig_orderflow else 0.5
         sell_ratio = sig_orderflow.metadata.get("sell_ratio", 0.5) if sig_orderflow else 0.5
