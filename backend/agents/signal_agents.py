@@ -682,10 +682,12 @@ class TrendBiasAgent:
         
         vr = var_10 / (10 * var_1)
         
-        # Map VR to Hurst proxy (roughly)
-        # VR = 1 -> H=0.5
-        # VR > 1 -> H > 0.5
-        self.hurst = 0.5 * (vr ** 0.5) # Heuristic mapping
+        # Correct Hurst estimation from Variance Ratio
+        # VR(q) = Var(r_q) / (q * Var(r_1)) ~ q^(2H-1)
+        # H = 0.5 * (log(VR)/log(q) + 1)
+        if vr > 0:
+            self.hurst = 0.5 * (np.log(vr) / np.log(10) + 1)
+            self.hurst = max(0.0, min(1.0, self.hurst))
 
     def _calculate_adx(self):
         """Simplified ADX calculation."""

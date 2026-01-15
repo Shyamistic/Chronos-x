@@ -19,8 +19,9 @@ def generate_dummy_data(filename="dummy_btc.csv"):
     # Geometric Brownian Motion with Trend
     np.random.seed(42)
     dt = 1/n_candles
-    mu = 0.0008 # Strong Drift (Super Trend)
-    sigma = 0.001 # Realistic Volatility (0.1% per min) - Low enough to hold, high enough for ATR
+    
+    # Regime Shift Simulation: Chop -> Bull Trend -> Volatility
+    # 0-300: Chop (Prime), 300-800: Strong Trend, 800-1000: Volatility
     
     price = 96000.0
     closes = []
@@ -28,15 +29,23 @@ def generate_dummy_data(filename="dummy_btc.csv"):
     highs = []
     lows = []
     
-    for _ in range(n_candles):
+    for i in range(n_candles):
+        if i < 300:
+            mu, sigma = 0.0000, 0.002 # Chop
+        elif i < 800:
+            mu, sigma = 0.0015, 0.004 # Strong Bull Trend (High Drift, Med Vol)
+        else:
+            mu, sigma = 0.0000, 0.008 # High Volatility Chop
+            
         shock = np.random.normal(0, 1)
-        change = price * (mu * dt + sigma * shock * np.sqrt(dt)) * 10 # Amplify for 1m timeframe
+        change = price * (mu * dt + sigma * shock * np.sqrt(dt)) * 20 # Amplify for 1m timeframe
         open_p = price
         price += change
         
-        # Create realistic candle wicks
-        high_p = max(open_p, price) + abs(np.random.normal(0, 5))
-        low_p = min(open_p, price) - abs(np.random.normal(0, 5))
+        # Create realistic candle wicks relative to volatility
+        vol_scale = price * sigma * 5
+        high_p = max(open_p, price) + abs(np.random.normal(0, vol_scale))
+        low_p = min(open_p, price) - abs(np.random.normal(0, vol_scale))
         
         opens.append(open_p)
         closes.append(price)
@@ -49,7 +58,7 @@ def generate_dummy_data(filename="dummy_btc.csv"):
         "high": highs,
         "low": lows,
         "close": closes,
-        "volume": [100 + abs(np.random.normal(0, 20)) for _ in range(n_candles)]
+        "volume": [1000 + abs(np.random.normal(0, 200)) for _ in range(n_candles)]
     }
     df = pd.DataFrame(data)
     df.to_csv(filename, index=False)
