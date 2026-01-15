@@ -96,17 +96,23 @@ class PaperTrader:
         # Apply surgical tweaks to let trades run longer and risk slightly more
         if getattr(self.config, "COMPETITION_MODE", False):
             print("[PaperTrader] COMPETITION MODE DETECTED: Applying aggressive tuning overrides.")
-            # 1. Let winners run: Increase TP multiplier (10x ATR)
-            self.config.ATR_TAKE_PROFIT_MULTIPLIER = 10.0
-            # 2. Trail later: Start at 2.0x ATR profit, keep stop at 1.0x ATR distance
-            self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER = 2.0
+            # 1. Let winners run: Target 3.0x ATR for swing moves ($50-100 zone)
+            self.config.ATR_TAKE_PROFIT_MULTIPLIER = 3.0
+            # 2. Trail later: Start at 1.5x ATR profit (was 2.0), keep stop at 1.0x ATR distance
+            self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5
             self.config.ATR_TRAILING_FLOOR_MULTIPLIER = 1.0
-            # 3. Increase max risk per trade to 3% (from 2%) to overcome fees
-            self.config.MAX_RISK_PER_TRADE = 0.03
-            # 4. Delay breakeven significantly (3x ATR) to avoid noise stop-outs
-            self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 3.0
+            # 3. Stop Loss: 1.2x ATR (approx 0.2-0.3% risk)
+            self.config.ATR_STOP_MULTIPLIER = 1.2
+            # 4. Reduce risk to 1.5% (was 3%) to preserve capital during drawdowns
+            self.config.MAX_RISK_PER_TRADE = 0.015
+            # 5. Activate breakeven at 1.2x ATR to lock in fees before trailing starts
+            self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.2
             # 5. Ensure breakeven exit covers fees (0.25% buffer)
             self.config.BREAKEVEN_PROFIT_PCT = 0.0025
+            
+        # Fee Configuration (WEEX Taker ~0.06%)
+        self.taker_fee_pct = 0.0006 
+        self.consecutive_losses = 0
         # -----------------------------
 
         self.execution_client = execution_client
@@ -243,7 +249,10 @@ class PaperTrader:
 
             # Adaptive Trailing Stop (Activate after 1x ATR profit, trail at 0.5x ATR from peak)
             activation_threshold_atr = self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER * atr_pct
-            if position.highest_pnl_pct > activation_threshold_atr:
+            # FEE AWARENESS: Don't start trailing until we are at least 2x fees in profit
+            fee_hurdle = self.taker_fee_pct * 3.0
+            
+            if position.highest_pnl_pct > max(activation_threshold_atr, fee_hurdle):
                 # Trail at a certain percentage below the highest PnL % achieved
                 trail_floor_pct = position.highest_pnl_pct - (self.config.ATR_TRAILING_FLOOR_MULTIPLIER * atr_pct)
                 if pnl_pct < trail_floor_pct:
@@ -421,6 +430,18 @@ class PaperTrader:
         else:
             self.atr_history[candle.symbol].append(0.0) # Append 0 or handle as needed until enough data
 
+        # --- FEE & VOLATILITY GATE ---
+        # If the expected move (ATR) is smaller than 3x fees (approx 0.18%), the edge is eaten by costs.
+        current_atr = self.atr_history[candle.symbol][-1]
+        min_volatility_threshold = candle.close * (self.taker_fee_pct * 3.0)
+        
+        # --- TILT CONTROL ---
+        # If we have taken 3 losses in a row, enter defensive mode.
+        is_defensive = self.consecutive_losses >= 3
+        if is_defensive:
+            if self.consecutive_losses == 3: # Log once
+                print(f"[PaperTrader] DEFENSIVE MODE: {self.consecutive_losses} consecutive losses. Tightening filters.")
+
         # --- Generate Ensemble Decision (needed for both exits and entries) ---
         signals = []
         sig_momentum = agents["momentum"].generate()
@@ -570,6 +591,14 @@ class PaperTrader:
                 print(f"[PaperTrader] Confidence {ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE} -> no trade")
                 return
             
+            # RR-AWARE ENTRY VETO
+            atr_pct = current_atr / candle.close
+            expected_move_pct = atr_pct * self.config.ATR_TAKE_PROFIT_MULTIPLIER
+            # Require at least 0.4% potential move to justify fees and risk (Swing Target)
+            if expected_move_pct < 0.004:
+                print(f"[PaperTrader] ENTRY VETO: Expected move {expected_move_pct:.2%} < 0.4% (ATR too low for swing).")
+                return
+            
             # Stricter entry in CHOP regime to prevent fee burn
             if regime.value == 'chop' and ensemble_decision.confidence < (self.config.MIN_CONFIDENCE + 0.1):
                 print(f"[PaperTrader] CHOP REGIME: Blocking entry due to insufficient confidence ({ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE + 0.1:.2f})")
@@ -585,34 +614,54 @@ class PaperTrader:
                 print("[PaperTrader] COMPETITION MODE: Blocking new entry in CHOP regime.")
                 return
             
+            # DEFENSIVE MODE CHECKS
+            if is_defensive:
+                # 1. Must align with trend if in trend regime
+                if regime.value in ('bull_trend', 'bear_trend'):
+                    trend_dir = 1 if regime.value == 'bull_trend' else -1
+                    if new_direction != trend_dir:
+                        print(f"[PaperTrader] DEFENSIVE: Ignoring counter-trend signal (Regime: {regime.value}).")
+                        return
+                # 2. If in chop, require higher confidence
+                elif ensemble_decision.confidence < 0.8:
+                    print(f"[PaperTrader] DEFENSIVE: Ignoring low confidence signal in chop ({ensemble_decision.confidence:.2f} < 0.8).")
+                    return
+            
             side = "buy" if new_direction > 0 else "sell"
             
-            # DYNAMIC POSITION SIZING: Base size on a % of current equity, divided among potential symbols
-            max_pos_usdt = self.equity * self.config.MAX_POSITION_AS_PCT_EQUITY
+            # --- HIGH-CONVICTION SIZING LOGIC ---
+            # Determine sizing mode based on regime, confidence, and session safety
+            is_high_confidence = (
+                regime.value in ("bull_trend", "bear_trend") and 
+                ensemble_decision.confidence >= 0.75 and
+                not is_defensive # Session safety: downgrade size if on losing streak
+            )
             
-            # Dynamic Kelly Fraction based on regime and confidence
-            dynamic_kelly_fraction = self.config.KELLY_FRACTION # Default
-            if regime.value in ("bull_trend", "bear_trend"):
-                dynamic_kelly_fraction *= self.config.KELLY_TREND_MULTIPLIER
-            elif regime.value in ("chop", "reversal"):
-                dynamic_kelly_fraction *= self.config.KELLY_CHOP_MULTIPLIER
-            dynamic_kelly_fraction = max(self.config.MIN_KELLY_FRACTION, min(self.config.MAX_KELLY_FRACTION, dynamic_kelly_fraction))
-            base_size_usdt = max_pos_usdt * dynamic_kelly_fraction
-
-            # STEP 2: CONVICTION-BASED POSITION EXPLOSION
-            conf = ensemble_decision.confidence
-            if conf < 0.75:
-                size_multiplier = 1.0 # Base size
-            elif conf < 0.85:
-                size_multiplier = 2.0
-            else: # conf >= 0.85
-                size_multiplier = 3.0
-            
-            # Apply an additional penalty for UNKNOWN regime during warm-up
-            if regime == MarketRegime.UNKNOWN and agents["processed_candles"] < agents["regime_detector"].lookback:
-                scaled_size_usdt = base_size_usdt * 0.2 # Very conservative sizing during warm-up
+            leverage = 20.0
+            if is_high_confidence:
+                # Target $50-100 profit on 0.5-1% move -> $10k notional -> $500 margin
+                # Use 40% of equity as margin (approx $400 on $1000 account)
+                target_margin_pct = 0.40 
+                print(f"[PaperTrader] SIZING: High confidence trend setup. Using {target_margin_pct:.0%} equity.")
             else:
-                scaled_size_usdt = base_size_usdt * size_multiplier
+                # Conservative sizing for chop/weak signals or recovery mode
+                target_margin_pct = 0.10
+                print(f"[PaperTrader] SIZING: Standard/Conservative setup. Using {target_margin_pct:.0%} equity.")
+
+            target_margin_usdt = self.equity * target_margin_pct
+            scaled_size_usdt = target_margin_usdt * leverage
+            
+            # Cap by max risk per trade (e.g. 1.5% of equity loss)
+            # Stop distance is ~1.2 ATR.
+            stop_loss_pct = atr_pct * self.config.ATR_STOP_MULTIPLIER
+            if stop_loss_pct > 0:
+                risk_per_share = stop_loss_pct * candle.close
+                max_loss_usdt = self.equity * self.config.MAX_RISK_PER_TRADE
+                max_size_by_risk = (max_loss_usdt / risk_per_share) * candle.close
+                
+                if max_size_by_risk < scaled_size_usdt:
+                    print(f"[PaperTrader] SIZING: Capped by risk. Target Notional: {scaled_size_usdt:.2f} -> Risk Cap: {max_size_by_risk:.2f}")
+                    scaled_size_usdt = max_size_by_risk
 
             # For pyramiding, we are adding to an existing position.
             # The size should be an *additional* amount, not the total.
@@ -869,6 +918,12 @@ class PaperTrader:
         self.total_pnl += pnl
         self.daily_pnl += pnl
         self.recent_pnls.append(pnl)
+        
+        # Update Tilt State
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
 
         # Distribute the result to all contributing agents for the bandit to learn
         agents = self._get_agents(trade.symbol)

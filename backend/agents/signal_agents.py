@@ -143,17 +143,17 @@ class MomentumRSIAgent:
         direction = 0
 
         # Mean-reversion signals: RSI extreme + price movement
-        if rsi < 48 and last_close > sma:
+        if rsi < 35 and last_close > sma:
             direction = +1 # Buy the dip
-        elif rsi > 52 and last_close < sma:
+        elif rsi > 65 and last_close < sma:
             direction = -1 # Sell the rally
 
         # COMPETITION ADDITION: Momentum Breakout Logic
         # If RSI is strong and price is trending, don't wait for a dip—BUY.
         if direction == 0:
-            if rsi > 65 and last_close > sma: # Even stricter breakout threshold to reduce chop
+            if rsi > 70 and last_close > sma: # Even stricter breakout threshold to reduce chop
                 direction = +1 # Momentum Long
-            elif rsi < 35 and last_close < sma: # Even stricter breakdown threshold
+            elif rsi < 30 and last_close < sma: # Even stricter breakdown threshold
                 direction = -1 # Momentum Short
 
         price_distance = abs(last_close - sma) / (sma + 1e-8)
