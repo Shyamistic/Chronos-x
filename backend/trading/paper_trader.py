@@ -853,13 +853,8 @@ class PaperTrader:
                 # WEEX API handles this naturally for same-side orders in Hedge Mode? 
                 # Actually, in Hedge Mode, multiple opens just add to the position or create new ones depending on exchange.
                 # Assuming standard behavior: Open Long adds to Long position.
-                print(f"[PaperTrader] EXECUTION: Placing {side} order for {final_size} {symbol}...")
-                response = self.execution_client.place_order(
-                    symbol=symbol,
-                    size=f"{final_size:.{get_precision(symbol)}f}",
-                    type_=order_type,
-                    price=str(price),
-                    client_order_id=order_id
+                print(f"[PaperTrader] EXECUTION: Placing SMART {side} order for {final_size} {symbol}...")
+                response = self.execution_client.place_smart_order(symbol, f"{final_size:.{get_precision(symbol)}f}", side
                 )
                 if isinstance(response, dict) and response.get("code") and response["code"] != "00000":
                     print(f"[PaperTrader] EXECUTION API ERROR: {response}")

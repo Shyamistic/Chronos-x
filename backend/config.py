@@ -8,6 +8,7 @@ class TradingConfig:
     # MODE CONTROL
     # ============================================================================
     FORCE_EXECUTE_MODE = False  # Set to False for finals to enable full governance
+    FORCE_EXECUTE_MODE = False  # Governance Active
     COMPETITION_MODE = True     # ✅ NEW: Enable aggressive competition settings
     
     # ============================================================================
