@@ -47,7 +47,7 @@ class TradingConfig:
     ATR_STOP_MULTIPLIER = 1.5 # Standard 1.5x ATR stop
     ATR_TAKE_PROFIT_MULTIPLIER = 4.0 # Target 3-4x ATR for swing moves
     ATR_TRAILING_ACTIVATION_MULTIPLIER = 2.0 # Activate later (2.0x ATR) to let trend develop
-    ATR_TRAILING_FLOOR_MULTIPLIER = 1.0 # Trail looser (1.0x ATR)
+    ATR_TRAILING_FLOOR_MULTIPLIER = 0.8 # Trail tighter (0.8x ATR) to lock gains after partial
     ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.0 # Move to breakeven after 1x ATR profit
     MAX_HOLD_TIME_MINUTES = 120  # Reduce to 2 hours to improve capital turnover
     

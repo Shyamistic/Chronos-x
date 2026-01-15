@@ -529,13 +529,13 @@ class TrendBiasAgent:
 
         if regime == "bull_trend":
             # RSI not ultra-overbought yet, and flow is buying
-            if 45 <= rsi <= 68 and buy_ratio > 0.6:
+            if 45 <= rsi <= 68 and buy_ratio > 0.55:
                 direction = 1
                 confidence = 0.9  # High conviction
         
         elif regime == "bear_trend":
             # RSI not ultra-oversold yet, and flow is selling
-            if 32 <= rsi <= 55 and sell_ratio > 0.6:
+            if 32 <= rsi <= 55 and sell_ratio > 0.55:
                 direction = -1
                 confidence = 0.9
 

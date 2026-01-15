@@ -256,6 +256,10 @@ class PaperTrader:
             # FEE AWARENESS: Don't start trailing until we are at least 2x fees in profit
             fee_hurdle = self.taker_fee_pct * 3.0
             
+            # WINNER'S GUARD: If partial profit taken, force trailing active immediately
+            if position.partial_taken:
+                activation_threshold_atr = 0.0
+            
             if position.highest_pnl_pct > max(activation_threshold_atr, fee_hurdle):
                 # Trail at a certain percentage below the highest PnL % achieved
                 trail_floor_pct = position.highest_pnl_pct - (self.config.ATR_TRAILING_FLOOR_MULTIPLIER * atr_pct)
