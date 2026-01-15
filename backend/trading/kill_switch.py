@@ -22,8 +22,8 @@ def kill_switch():
     # We try to close large amounts first. If we hold less, the API usually rejects "size > position",
     # so we step down the ladder until it accepts the size we actually hold.
     SIZE_LADDER = {
-        "cmt_btcusdt": ["2.0", "1.0", "0.5", "0.1", "0.05", "0.02", "0.01", "0.005", "0.001"],
-        "cmt_ethusdt": ["20.0", "10.0", "5.0", "1.0", "0.5", "0.2", "0.1", "0.05", "0.01"],
+        "cmt_btcusdt": ["2.0", "1.0", "0.5", "0.1", "0.05", "0.02", "0.01", "0.005", "0.001", "0.0001"],
+        "cmt_ethusdt": ["20.0", "10.0", "5.0", "1.0", "0.5", "0.2", "0.1", "0.05", "0.01", "0.001"],
         "cmt_solusdt": ["100.0", "50.0", "10.0", "5.0", "1.0", "0.5"],
     }
 
@@ -64,9 +64,13 @@ def kill_switch():
                         break # Success, move to next size
                     except Exception as e:
                         err_str = str(e)
+                        # Append response text if available to catch 40015 code hidden in body
+                        if hasattr(e, 'response') and e.response is not None:
+                            err_str += f" {e.response.text}"
+
                         # DETECT LOCK: If error is 40015 (Pending Orders), cancel and retry
                         if "40015" in err_str or "position side invalid" in err_str:
-                            print(f"❌ LOCKED (40015). Cancelling orders & waiting 2s (Attempt {retry_idx+1})...")
+                            print(f"❌ LOCKED (40015). Cancelling orders & waiting 1s (Attempt {retry_idx+1})...")
                             try:
                                 client.cancel_all_orders(symbol)
                             except: pass
