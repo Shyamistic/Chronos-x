@@ -241,6 +241,15 @@ class WeexClient:
             auth=True,
         )
 
+    def cancel_all_orders(self, symbol: str) -> Dict[str, Any]:
+        """Cancel all pending orders for a symbol to free up position."""
+        return self._request(
+            "POST",
+            "/capi/v2/order/cancelAllOrders",
+            json_body={"symbol": symbol},
+            auth=True,
+        )
+
     def get_account_balance(self) -> Dict[str, Any]:
         """
         Get account balance - safe API test method.

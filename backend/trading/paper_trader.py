@@ -105,6 +105,8 @@ class PaperTrader:
             self.config.MAX_RISK_PER_TRADE = 0.03
             # 4. Delay breakeven significantly (3x ATR) to avoid noise stop-outs
             self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 3.0
+            # 5. Ensure breakeven exit covers fees (0.25% buffer)
+            self.config.BREAKEVEN_PROFIT_PCT = 0.0025
         # -----------------------------
 
         self.execution_client = execution_client
@@ -296,9 +298,9 @@ class PaperTrader:
         if self.config.COMPETITION_MODE and regime_state.current == MarketRegime.UNKNOWN and agents["processed_candles"] > detector.lookback:
             z_score = detector.z_score if hasattr(detector, 'z_score') else 0.0
             # If z_score is significant, force a trend. Otherwise, assume REVERSAL/CHOP to enable trading.
-            if abs(z_score) > 0.75: # Raised to 0.75 to reduce chop entries
+            if abs(z_score) > 1.25: # Raised to 1.25 to drastically reduce false trend identification
                 forced_regime = MarketRegime.BULL_TREND if z_score > 0 else MarketRegime.BEAR_TREND
-                print(f"[PaperTrader] [{candle.symbol}] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to z-score ({z_score:.2f}).")
+                print(f"[PaperTrader] [{candle.symbol}] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to strong z-score ({z_score:.2f}).")
                 agents["current_regime"] = forced_regime
             else:
                 print(f"[PaperTrader] [{candle.symbol}] COMPETITION: Forced regime from UNKNOWN to CHOP due to weak z-score ({z_score:.2f}).")
@@ -497,9 +499,8 @@ class PaperTrader:
             if (is_long and new_direction == -1) or (not is_long and new_direction == 1):
                 # Before closing, check if the flip is due to low confidence.
                 # If confidence is very low, it might be noise, so don't flip aggressively.
-                flip_threshold = self.config.MIN_CONFIDENCE + 0.25 if regime.value == 'chop' else self.config.MIN_CONFIDENCE
                 if ensemble_decision.confidence < flip_threshold:
-                    print(f"[PaperTrader] SIGNAL FLIP: Suppressing due to low confidence ({ensemble_decision.confidence:.2f} < {flip_threshold:.2f}).")
+                    print(f"[PaperTrader] SIGNAL FLIP: Suppressing due to low confidence/young trade (Conf: {ensemble_decision.confidence:.2f} < Threshold: {flip_threshold:.2f}, Hold: {int(hold_time_minutes)}m).")
                     return
                 print(f"[PaperTrader] SIGNAL FLIP: Closing {current_position.side} position for {candle.symbol}.")
                 self._close_position(symbol=candle.symbol, exit_price=candle.close, timestamp=candle.timestamp, exit_reason="signal_flip")
@@ -553,6 +554,16 @@ class PaperTrader:
 
             if ensemble_decision.confidence < self.config.MIN_CONFIDENCE:
                 print(f"[PaperTrader] Confidence {ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE} -> no trade")
+                return
+            
+            # Stricter entry in CHOP regime to prevent fee burn
+            if regime.value == 'chop' and ensemble_decision.confidence < (self.config.MIN_CONFIDENCE + 0.1):
+                print(f"[PaperTrader] CHOP REGIME: Blocking entry due to insufficient confidence ({ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE + 0.1:.2f})")
+                return
+            
+            # Stricter entry in CHOP regime to prevent fee burn
+            if regime.value == 'chop' and ensemble_decision.confidence < (self.config.MIN_CONFIDENCE + 0.1):
+                print(f"[PaperTrader] CHOP REGIME: Blocking entry due to insufficient confidence ({ensemble_decision.confidence:.2f} < {self.config.MIN_CONFIDENCE + 0.1:.2f})")
                 return
             
             # Regime-based trading restriction (Concentrate Risk)
@@ -700,6 +711,23 @@ class PaperTrader:
                     print(f"[PaperTrader] EXECUTION API ERROR: {response}")
                     return False
                 print(f"[PaperTrader] EXECUTION SUCCESS: Order placed. Response: {response}")
+                
+                # AI LOG UPLOAD (Compliance)
+                if hasattr(self.execution_client, 'upload_ai_log'):
+                    try:
+                        ai_log = {
+                            "symbol": symbol,
+                            "side": "1" if side == "buy" else "2",
+                            "size": str(final_size),
+                            "price": str(price),
+                            "timestamp": int(timestamp.timestamp() * 1000),
+                            "ai_reason": governance_reason or "Ensemble Signal",
+                            "confidence": str(ensemble_confidence),
+                            "regime": regime
+                        }
+                        self.execution_client.upload_ai_log(ai_log)
+                    except Exception as e:
+                        print(f"[PaperTrader] AI Log Upload Failed: {e}")
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR: {e}")
                 return False
@@ -791,6 +819,22 @@ class PaperTrader:
                     return
 
                 print(f"[PaperTrader] EXECUTION SUCCESS: Position closed. Response: {response}")
+                
+                # AI LOG UPLOAD (Compliance for Close)
+                if hasattr(self.execution_client, 'upload_ai_log'):
+                    try:
+                        ai_log = {
+                            "symbol": symbol,
+                            "side": close_type, # 3 or 4
+                            "size": f"{position_to_close.size:.{get_precision(symbol)}f}",
+                            "price": str(exit_price),
+                            "timestamp": int(timestamp.timestamp() * 1000),
+                            "ai_reason": exit_reason,
+                            "regime": position_to_close.regime
+                        }
+                        self.execution_client.upload_ai_log(ai_log)
+                    except Exception as e:
+                        print(f"[PaperTrader] AI Log Upload Failed (Close): {e}")
             except Exception as e:
                 print(f"[PaperTrader] EXECUTION ERROR (Close): {e}")
                 return

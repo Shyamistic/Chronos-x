@@ -112,6 +112,14 @@ def close_all():
             
         print(f"Processing {symbol} | Side: {side_raw} | Size: {size}")
         
+        # NEW: Cancel pending orders to avoid "position side invalid" (40015)
+        try:
+            print(f"Cancelling pending orders for {symbol}...")
+            client.cancel_all_orders(symbol)
+            time.sleep(0.5) # Wait for cancellation to propagate
+        except Exception as e:
+            print(f"Warning: Could not cancel orders for {symbol} (might not be supported or none exist): {e}")
+
         # Determine close type
         # 1 (Long) -> Close with 3 (Close Long)
         # 2 (Short) -> Close with 4 (Close Short)
