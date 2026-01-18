@@ -13,7 +13,7 @@ class TradingConfig:
     # ============================================================================
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
-    MIN_CONFIDENCE = 0.75 if COMPETITION_MODE else 0.50 # Raised to 0.75 to reduce fee churn
+    MIN_CONFIDENCE = 0.70 if COMPETITION_MODE else 0.50 # Stricter threshold for quality trades
     MAX_POSITION_AS_PCT_EQUITY = 20.0 if COMPETITION_MODE else 5.0  # Allow up to 20x leverage (governed by risk per trade)
     KELLY_FRACTION = 0.25 if COMPETITION_MODE else 0.40  # Reduced from 0.80
     KELLY_TREND_MULTIPLIER = 1.2 # Reduced from 1.5

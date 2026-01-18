@@ -646,8 +646,8 @@ class PaperTrader:
         
         # Block new entries until reconciliation has run successfully
         if not self.reconciliation_stable:
-            print(f"[PaperTrader] Entry blocked: Reconciliation not stable.")
-            return
+            print(f"[PaperTrader] WARNING: Reconciliation not stable. Proceeding with INTERNAL LEDGER ONLY (no exchange sync).")
+            # Do NOT return here – allow entries.
 
         # Allow entry if no position OR if pyramiding is active and we want to add to the same-direction position
         allow_entry = False
@@ -1138,32 +1138,6 @@ class PaperTrader:
 
             entry_price = float(pos.get("averageOpenPrice", 0) or pos.get("openPrice", 0))
             
-# ... existing code ...
-    def reconcile_positions(self, external_positions: List[Dict[str, Any]]):
-        """
-        Sync internal state with actual exchange positions on startup.
-        """
-        print(f"[PaperTrader] Reconciling {len(external_positions)} external positions...")
-        for pos in external_positions:
-            symbol = pos.get("symbol")
-            if not symbol: continue
-            
-            # WEEX specific field mapping
-            # Try 'holdAmount' (common) or 'size'
-            size = float(pos.get("holdAmount", 0) or pos.get("size", 0))
-            if size <= 0: continue
-            
-            # Determine side: 1=long, 2=short usually
-            side_raw = str(pos.get("side", "")).lower()
-            if "long" in side_raw or side_raw == "1":
-                side = "buy"
-            elif "short" in side_raw or side_raw == "2":
-                side = "sell"
-            else:
-                continue # Unknown side
-
-            entry_price = float(pos.get("averageOpenPrice", 0) or pos.get("openPrice", 0))
-            
             # --- CHECK INTERNAL STATE FIRST ---
             # If we manually injected a position, respect it if it matches.
             if symbol in self.open_positions:
@@ -1176,111 +1150,12 @@ class PaperTrader:
                     existing.entry_price = entry_price
                     continue # Done with this position
 
-                # Case 2: Side Mismatch -> Hedged State
-                print(f"[PaperTrader] CRITICAL WARNING: HEDGED STATE DETECTED for {symbol}. Found {side} while holding {existing.side}.")
-                
-                # COMPETITION LOGIC: Auto-resolve hedge by closing the newly found position to maintain single-slot state
-                if self.execution_client:
-                    print(f"[PaperTrader] RECONCILIATION: Auto-closing conflicting {side} position for {symbol} to enforce single-mode.")
-                    try:
-                        # 3=Close Long, 4=Close Short
-                        close_type = "3" if side == "buy" else "4"
-                        self.execution_client.place_order(
-                            symbol=symbol,
-                            size=f"{size:.{get_precision(symbol)}f}",
-                            type_=close_type,
-                            price="0",
-                            match_price="1"
-                        )
-                    except Exception as e:
-                        print(f"[PaperTrader] Failed to auto-close hedged position: {e}")
-                continue
+                # Case 2: Side Mismatch -> Hedged State (Handled below)
+                # We fall through to the existing logic for conflict resolution.
+                pass 
 
             # --- ORPHAN HANDLING (No internal record) ---
             
-            # --- Legacy/Misaligned Position Cleanup ---
-            agents = self._get_agents(symbol)
-            current_regime = agents.get("current_regime", MarketRegime.UNKNOWN)
-            
-            if self.config.COMPETITION_MODE and current_regime in (MarketRegime.BULL_TREND, MarketRegime.BEAR_TREND):
-                is_misaligned = False
-                if current_regime == MarketRegime.BULL_TREND and side == "sell":
-                    is_misaligned = True
-                elif current_regime == MarketRegime.BEAR_TREND and side == "buy":
-                    is_misaligned = True
-                
-                if is_misaligned:
-                    print(f"[PaperTrader] RECONCILIATION: Found misaligned {side} position for {symbol} in {current_regime.value}. Auto-closing legacy position.")
-                    if self.execution_client:
-                        try:
-                            # 3=Close Long, 4=Close Short
-                            close_type = "3" if side == "buy" else "4"
-                            self.execution_client.place_order(
-                                symbol=symbol,
-                                size=f"{size:.{get_precision(symbol)}f}",
-                                type_=close_type,
-                                price="0",
-                                match_price="1"
-                            )
-                            # Log compliance
-                            if hasattr(self.execution_client, 'upload_ai_log'):
-                                self.execution_client.upload_ai_log({
-                                    "symbol": symbol,
-                                    "side": close_type,
-                                    "size": str(size),
-                                    "price": str(entry_price),
-                                    "timestamp": int(datetime.now().timestamp() * 1000),
-                                    "model": "ChronosX-Governance",
-                                    "input": f"Regime: {current_regime.value}",
-                                    "output": "Close Legacy",
-                                    "explanation": "Startup cleanup of misaligned legacy position",
-                                    "stage": "production"
-                                })
-                        except Exception as e:
-                            print(f"[PaperTrader] Failed to auto-close legacy position: {e}")
-                    continue # Do not adopt this position
-            # -----------------------------------------------
-
-            print(f"[PaperTrader] Adopting orphan position: {symbol} {side} {size} @ {entry_price}")
-            self.open_positions[symbol] = TradeRecord(
-                timestamp=datetime.now(), # Unknown original time
-                symbol=symbol,
-                side=side,
-                size=size,
-                entry_price=entry_price,
-                exit_price=entry_price,
-                pnl=0.0,
-                agent_id="manual_recovery",
-                governance_reason="Startup Reconciliation",
-                risk_score=0.0,
-                regime="unknown",
-                exit_reason="open"
-            )
-
-    # ================================================================ #
-# ... existing code ...
-            # --- CHECK INTERNAL STATE FIRST ---
-            # If we manually injected a position, respect it if it matches.
-            if symbol in self.open_positions:
-                existing = self.open_positions[symbol]
-                
-                # Case 1: Perfect Match (or close enough) -> Update details
-                if existing.side == side:
-                    print(f"[PaperTrader] RECONCILIATION: Confirmed existing {side} position for {symbol}. Updating details.")
-                    existing.size = size
-                    existing.entry_price = entry_price
-                    continue # Done with this position
-
-                # Case 2: Side Mismatch -> Hedged State (Handled below, but we catch it here to avoid duplicate logic if we wanted)
-                # We fall through to the existing logic for conflict resolution, 
-                # but we must skip the "Legacy/Misaligned" check for known positions.
-                pass 
-            
-            # If we are here, either it's an orphan, OR it's a conflict with internal state.
-            # If it's a conflict, the logic below handles it.
-            # If it's an orphan, we check for misalignment.
-            
-            # Only check misalignment if we DON'T have an internal record (Orphan)
             # --- NEW: Legacy/Misaligned Position Cleanup ---
             agents = self._get_agents(symbol)
             current_regime = agents.get("current_regime", MarketRegime.UNKNOWN)

@@ -290,7 +290,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
 
     async def stop(self):
         """Stop live trading loop gracefully and close all open positions."""
-        print("[WeexTradingLoop] Stopping and closing all open positions...")
+        print("[WeexTradingLoop] Stopping and closing all open positions based on INTERNAL LEDGER...")
         self.running = False
 
         # Iterate through a copy of open_positions to avoid RuntimeError: dictionary changed size during iteration
