@@ -100,8 +100,8 @@ class PaperTrader:
         # Apply surgical tweaks to let trades run longer and risk slightly more
         if getattr(self.config, "COMPETITION_MODE", False):
             print("[PaperTrader] COMPETITION MODE DETECTED: Applying aggressive tuning overrides.")
-            # 1. Let winners run: Target 3.0x ATR for swing moves ($50-100 zone)
-            self.config.ATR_TAKE_PROFIT_MULTIPLIER = 3.0
+            # 1. Let winners run: Target 8.0x ATR (High Ceiling) to allow dynamic trailing to capture runs
+            self.config.ATR_TAKE_PROFIT_MULTIPLIER = 8.0
             # 2. Trail later: Start at 1.5x ATR profit (was 2.0), keep stop at 1.0x ATR distance
             self.config.ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5
             self.config.ATR_TRAILING_FLOOR_MULTIPLIER = 1.0
@@ -270,10 +270,20 @@ class PaperTrader:
                 activation_threshold_atr = 0.0
             
             if position.highest_pnl_pct > max(activation_threshold_atr, fee_hurdle):
-                # Trail at a certain percentage below the highest PnL % achieved
-                trail_floor_pct = position.highest_pnl_pct - (self.config.ATR_TRAILING_FLOOR_MULTIPLIER * atr_pct)
+                # DYNAMIC TIGHTENING: As profit grows, tighten the trail to lock it in.
+                # "Jane Street" style: Don't give back open PnL on winners.
+                current_trail_mult = self.config.ATR_TRAILING_FLOOR_MULTIPLIER
+                
+                # If > 3x ATR profit, tighten trail to 0.5x ATR
+                if position.highest_pnl_pct > (atr_pct * 3.0):
+                    current_trail_mult = 0.5
+                # If > 5x ATR profit, tighten trail to 0.2x ATR (Sniper exit)
+                if position.highest_pnl_pct > (atr_pct * 5.0):
+                    current_trail_mult = 0.2
+                
+                trail_floor_pct = position.highest_pnl_pct - (current_trail_mult * atr_pct)
                 if pnl_pct < trail_floor_pct:
-                    return True, f"Adaptive Trailing Stop hit: {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%}, ATR: {effective_atr:.4f})"
+                    return True, f"Adaptive Trailing Stop hit: {pnl_pct:.2%} (Peak: {position.highest_pnl_pct:.2%}, Trail: {current_trail_mult}x ATR)"
 
             # Adaptive Breakeven Protection (Move stop to breakeven + small profit after 1x ATR profit)
             if position.highest_pnl_pct >= self.config.ATR_BREAKEVEN_ACTIVATION_MULTIPLIER * atr_pct:
@@ -424,6 +434,41 @@ class PaperTrader:
         agents["momentum"].update(candle)
         agents["sentiment"].update(candle)
         
+        # --- NEW: Price Action / Liquidity Sweep Detector ---
+        # "Jane Street" style microstructure signal: Detect rejection of price levels (wicks) with volume.
+        # This adds high-frequency alpha to the ensemble.
+        body_size = abs(candle.close - candle.open)
+        upper_wick = candle.high - max(candle.close, candle.open)
+        lower_wick = min(candle.close, candle.open) - candle.low
+        total_range = candle.high - candle.low
+        
+        if total_range > 0:
+            # Bearish Rejection (Shooting Star / Liquidity Grab)
+            # Wick must be significant (> 2.5x body) and dominant (> 2x lower wick)
+            if upper_wick > (body_size * 2.5) and upper_wick > (lower_wick * 2):
+                from backend.agents.signal_agents import TradingSignal as AgentTradingSignal
+                sweep_sig = AgentTradingSignal(
+                    agent_id="price_action",
+                    direction=-1,
+                    confidence=0.80, # High confidence rejection
+                    metadata={"pattern": "bearish_sweep", "wick_ratio": upper_wick/total_range}
+                )
+                signals.append(sweep_sig)
+                print(f"[PaperTrader] ALPHA SIGNAL: Bearish Liquidity Sweep detected (Wick: {upper_wick:.2f})")
+
+            # Bullish Rejection (Hammer / Liquidity Grab)
+            elif lower_wick > (body_size * 2.5) and lower_wick > (upper_wick * 2):
+                from backend.agents.signal_agents import TradingSignal as AgentTradingSignal
+                sweep_sig = AgentTradingSignal(
+                    agent_id="price_action",
+                    direction=1,
+                    confidence=0.80, # High confidence rejection
+                    metadata={"pattern": "bullish_sweep", "wick_ratio": lower_wick/total_range}
+                )
+                signals.append(sweep_sig)
+                print(f"[PaperTrader] ALPHA SIGNAL: Bullish Liquidity Sweep detected (Wick: {lower_wick:.2f})")
+        # ----------------------------------------------------
+
         # --- NEW: Order Flow Estimation ---
         # Estimate buy/sell volume from candle data to make OrderFlowAgent functional
         try:
@@ -691,9 +736,9 @@ class PaperTrader:
             # RR-AWARE ENTRY VETO
             atr_pct = current_atr / candle.close
             expected_move_pct = atr_pct * self.config.ATR_TAKE_PROFIT_MULTIPLIER
-            # Require at least 0.05% potential move (lowered from 0.1%) to justify fees and risk
-            if expected_move_pct < 0.0005:
-                print(f"[PaperTrader] ENTRY VETO: Expected move {expected_move_pct:.2%} < 0.05% (ATR too low for swing).")
+            # Require at least 0.15% potential move to justify fees and risk (Swing Target)
+            if expected_move_pct < 0.0015:
+                print(f"[PaperTrader] ENTRY VETO: Expected move {expected_move_pct:.2%} < 0.15% (ATR too low for swing).")
                 return
             
             # Stricter entry in CHOP regime to prevent fee burn

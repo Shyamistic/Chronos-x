@@ -23,7 +23,7 @@ class TradingConfig:
     # ============================================================================
     # CIRCUIT BREAKERS (COMPETITION SETTINGS)
     # ============================================================================
-    MAX_DAILY_LOSS = -0.10 if COMPETITION_MODE else -0.03  # Relax to -10% for high-volatility backtest
+    MAX_DAILY_LOSS = -0.02  # Tighten to -2% to preserve capital
     MAX_WEEKLY_LOSS = -0.20 if COMPETITION_MODE else -0.10
     MAX_DRAWDOWN = -0.30 if COMPETITION_MODE else -0.20
     MAX_LEVERAGE = 25.0  # 25x for maximum catch-up potential
@@ -35,7 +35,7 @@ class TradingConfig:
     MAX_SLIPPAGE = 0.003  # 0.3%
     MAX_EXECUTION_LATENCY_MS = 1500  # 1.5 seconds
     MIN_VOLUME_RATIO = 0.01  # Order must be <1% of recent volume
-    MAX_RISK_PER_TRADE = 0.030 # Increased to 3.0% for aggressive recovery
+    MAX_RISK_PER_TRADE = 0.015 # Reduced to 1.5% to survive drawdowns
 
     # ============================================================================
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE
@@ -44,8 +44,8 @@ class TradingConfig:
     BREAKEVEN_PROFIT_PCT = 0.0040 # 0.4% profit to strictly cover fees (0.12% roundtrip) + buffer
     
     # ATR-based adaptive stops (multipliers for ATR value)
-    ATR_STOP_MULTIPLIER = 1.5 # Standard 1.5x ATR stop
-    ATR_TAKE_PROFIT_MULTIPLIER = 15.0 # Target 15x ATR to allow entries in low vol
+    ATR_STOP_MULTIPLIER = 1.2 # Standard 1.2x ATR stop
+    ATR_TAKE_PROFIT_MULTIPLIER = 8.0 # Target 8x ATR (High ceiling) to allow dynamic trailing to capture runs
     ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5 # Activate earlier (1.5x ATR)
     ATR_TRAILING_FLOOR_MULTIPLIER = 1.0 # Trail looser (1.0x ATR)
     ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.2 # Move to breakeven after 1.2x ATR profit
