@@ -127,11 +127,12 @@ class WeexClient:
                 
                 resp.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
                 return resp.json()
-            except requests.exceptions.HTTPError as e:
-                # FAIL FAST: Do not retry Client Errors (400-499)
-                if e.response is not None and 400 <= e.response.status_code < 500:
-                    raise e
             except requests.exceptions.RequestException as e:
+                # FAIL FAST: Do not retry Client Errors (400-499)
+                if isinstance(e, requests.exceptions.HTTPError):
+                    if e.response is not None and 400 <= e.response.status_code < 500:
+                        raise e
+
                 print(f"[WeexClient] API call failed (Attempt {attempt + 1}/{retries}): {e}")
                 if attempt < retries - 1:
                     sleep_time = backoff_factor * (2 ** attempt)

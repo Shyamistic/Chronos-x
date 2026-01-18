@@ -206,6 +206,7 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
                             close=float(raw_candle[4]),
                             volume=float(raw_candle[5]),
                         )
+                        candle.symbol = symbol # Fix: Inject symbol to prevent agent errors
                         candles.append(candle)
                     except (ValueError, IndexError) as e:
                         print(f"[WeexTradingLoop] Skipping malformed candle during priming: {raw_candle}, error: {e}")
@@ -274,8 +275,11 @@ Quality Gates:          Slippage <0.3%, Latency <1500ms, Volume check
             self.paper_trader.reconciliation_stable = True
             print("[WeexTradingLoop] STATE: Reconciliation successful. Exchange state is source of truth. Pyramiding ENABLED.")
         else:
-            self.paper_trader.reconciliation_stable = False
-            print("[WeexTradingLoop] WARNING: Reconciliation failed. Switching to internal ledger as source of truth. Pyramiding DISABLED.")
+            if self.paper_trader.reconciliation_stable:
+                print("[WeexTradingLoop] WARNING: Reconciliation failed, but BYPASS MODE is active. Proceeding with internal ledger.")
+            else:
+                self.paper_trader.reconciliation_stable = False
+                print("[WeexTradingLoop] WARNING: Reconciliation failed. Switching to internal ledger as source of truth. Pyramiding DISABLED.")
         # --- RECONCILIATION END ---
 
         tasks = [self._run_for_symbol(symbol) for symbol in self.symbols]

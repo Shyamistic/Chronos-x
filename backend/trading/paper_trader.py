@@ -337,7 +337,7 @@ class PaperTrader:
         if self.config.COMPETITION_MODE and regime_state.current == MarketRegime.UNKNOWN and agents["processed_candles"] > detector.lookback:
             z_score = detector.z_score if hasattr(detector, 'z_score') else 0.0
             # If z_score is significant, force a trend. Otherwise, assume REVERSAL/CHOP to enable trading.
-            if abs(z_score) > 1.25: # Raised to 1.25 to drastically reduce false trend identification
+            if abs(z_score) > 0.60: # Lowered to 0.60 to catch weak trends and enable trading
                 forced_regime = MarketRegime.BULL_TREND if z_score > 0 else MarketRegime.BEAR_TREND
                 print(f"[PaperTrader] [{candle.symbol}] COMPETITION: Forced regime from UNKNOWN to {forced_regime.value} due to strong z-score ({z_score:.2f}).")
                 agents["current_regime"] = forced_regime
@@ -599,6 +599,9 @@ class PaperTrader:
                 if regime.value == 'chop':
                     flip_threshold += 0.15
                 
+                # Cap threshold at 0.95 to ensure a flip is mathematically possible with max conviction
+                flip_threshold = min(flip_threshold, 0.95)
+                
                 # HYSTERESIS: If trade is young (< 15 mins) and not in danger (PnL > -0.5%), require overwhelming evidence (0.85+) to flip
                 if hold_time_minutes < 15 and pnl_pct > -0.005:
                     flip_threshold = max(flip_threshold, 0.85)
@@ -732,11 +735,11 @@ class PaperTrader:
             leverage = 20.0
             if is_boosted:
                 # Boosted: 0.4x Equity Notional
-                target_margin_pct = 0.40 
+                target_margin_pct = 0.60 
                 print(f"[PaperTrader] SIZING: BOOSTED Trend Setup. Using {target_margin_pct:.0%} equity.")
             else:
                 # Base: 0.15x Equity Notional
-                target_margin_pct = 0.15
+                target_margin_pct = 0.30
                 print(f"[PaperTrader] SIZING: Base Trend Setup. Using {target_margin_pct:.0%} equity.")
 
             target_margin_usdt = self.equity * target_margin_pct

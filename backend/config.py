@@ -14,7 +14,7 @@ class TradingConfig:
     # RISK PARAMETERS (ALPHA MODE - LOOSENED)
     # ============================================================================
     MIN_CONFIDENCE = 0.70 if COMPETITION_MODE else 0.50 # Stricter threshold for quality trades
-    MAX_POSITION_AS_PCT_EQUITY = 0.15 if COMPETITION_MODE else 0.50  # Recovery: 15% notional (0.15x leverage)
+    MAX_POSITION_AS_PCT_EQUITY = 20.0 if COMPETITION_MODE else 5.0  # Allow up to 20x leverage (governed by risk per trade)
     KELLY_FRACTION = 0.25 if COMPETITION_MODE else 0.40  # Reduced from 0.80
     KELLY_TREND_MULTIPLIER = 1.2 # Reduced from 1.5
     KELLY_CHOP_MULTIPLIER = 0.5 # Reduced from 0.6
@@ -35,7 +35,7 @@ class TradingConfig:
     MAX_SLIPPAGE = 0.003  # 0.3%
     MAX_EXECUTION_LATENCY_MS = 1500  # 1.5 seconds
     MIN_VOLUME_RATIO = 0.01  # Order must be <1% of recent volume
-    MAX_RISK_PER_TRADE = 0.010 # Reduced to 1.0% to survive drawdowns
+    MAX_RISK_PER_TRADE = 0.030 # Increased to 3.0% for aggressive recovery
 
     # ============================================================================
     # EXIT TRIGGERS & ADDITIONAL GOVERNANCE
@@ -62,7 +62,7 @@ class TradingConfig:
     # ============================================================================
     # REGIME-AWARE TRADING
     # ============================================================================
-    TRADE_IN_CHOPPY_REGIME = False  # ❌ COMPETITION: Disable chop trading to save fees
+    TRADE_IN_CHOPPY_REGIME = True  # ✅ COMPETITION: Enable chop trading to catch breakouts
     
     @property
     def MAX_POSITION_SIZE(self):

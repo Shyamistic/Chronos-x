@@ -99,6 +99,7 @@ class Backtester:
                     symbol=symbol,
                     exit_price=float(last_row["close"]),
                     timestamp=pd.to_datetime(last_row["timestamp"]),
+                    exit_reason="backtest_end"
                 )
 
         metrics = trader.get_summary_metrics()

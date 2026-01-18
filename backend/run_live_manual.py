@@ -7,6 +7,8 @@ from backend.trading.weex_live import WeexTradingLoop
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
+# Reduce noise from uvicorn access logs
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # Define the portfolio of symbols to trade
 SYMBOLS_TO_TRADE = [
@@ -14,14 +16,6 @@ SYMBOLS_TO_TRADE = [
     "cmt_ethusdt", # Enable ETH for diversification
     # "cmt_solusdt",
 ]
-
-class SafePaperTrader(PaperTrader):
-    """Wrapper to ensure candles have symbol attribute during priming."""
-    async def prime_agents(self, symbol, candles):
-        for c in candles:
-            if not hasattr(c, 'symbol') or not c.symbol:
-                c.symbol = symbol
-        await super().prime_agents(symbol, candles)
 
 async def main():
     print("Initializing ChronosX Live Trading...")
@@ -31,7 +25,7 @@ async def main():
     
     # Initialize Paper Trader with execution enabled
     # Note: execution_client is passed here to enable real orders
-    trader = SafePaperTrader(execution_client=client)
+    trader = PaperTrader(execution_client=client)
     
     # FIX: Bypass reconciliation to avoid 521 errors from Weex API
     trader.reconciliation_stable = True
