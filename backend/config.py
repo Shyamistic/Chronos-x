@@ -45,7 +45,7 @@ class TradingConfig:
     
     # ATR-based adaptive stops (multipliers for ATR value)
     ATR_STOP_MULTIPLIER = 1.5 # Standard 1.5x ATR stop
-    ATR_TAKE_PROFIT_MULTIPLIER = 5.0 # Target 5x ATR for extended swing moves
+    ATR_TAKE_PROFIT_MULTIPLIER = 10.0 # Target 10x ATR to allow entries in low vol
     ATR_TRAILING_ACTIVATION_MULTIPLIER = 1.5 # Activate earlier (1.5x ATR)
     ATR_TRAILING_FLOOR_MULTIPLIER = 1.0 # Trail looser (1.0x ATR)
     ATR_BREAKEVEN_ACTIVATION_MULTIPLIER = 1.2 # Move to breakeven after 1.2x ATR profit
