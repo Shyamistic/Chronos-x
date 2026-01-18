@@ -30,6 +30,11 @@ async def main():
     # FIX: Bypass reconciliation to avoid 521 errors from Weex API
     trader.reconciliation_stable = True
     
+    # --- MANUAL STATE SYNC (Based on Dashboard) ---
+    # Injecting known positions so the bot manages/closes them
+    trader.inject_manual_position("cmt_btcusdt", "sell", 0.0007, 96549.40)
+    trader.inject_manual_position("cmt_ethusdt", "sell", 0.003, 3329.38)
+    
     # Initialize the Trading Loop
     bot_loop = WeexTradingLoop(
         weex_client=client, 
