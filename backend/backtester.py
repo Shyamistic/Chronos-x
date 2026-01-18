@@ -69,7 +69,7 @@ class Backtester:
         # Run the simulation asynchronously
         loop = asyncio.get_event_loop()
         
-        # SPLIT DATA: Prime with first 300 candles, trade on the rest
+        # SPLIT DATA: Prime with first 350 candles, trade on the rest
         prime_count = 350
         if len(df) > prime_count:
             prime_df = df.iloc[:prime_count]
