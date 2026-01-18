@@ -691,9 +691,9 @@ class PaperTrader:
             # RR-AWARE ENTRY VETO
             atr_pct = current_atr / candle.close
             expected_move_pct = atr_pct * self.config.ATR_TAKE_PROFIT_MULTIPLIER
-            # Require at least 0.1% potential move (lowered from 0.4%) to justify fees and risk
-            if expected_move_pct < 0.001:
-                print(f"[PaperTrader] ENTRY VETO: Expected move {expected_move_pct:.2%} < 0.1% (ATR too low for swing).")
+            # Require at least 0.05% potential move (lowered from 0.1%) to justify fees and risk
+            if expected_move_pct < 0.0005:
+                print(f"[PaperTrader] ENTRY VETO: Expected move {expected_move_pct:.2%} < 0.05% (ATR too low for swing).")
                 return
             
             # Stricter entry in CHOP regime to prevent fee burn
